@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Juicios DGR</title>
+  <meta name="description" content="Buscador de juicios de ejecución fiscal — DGR Tucumán">
+  <meta name="theme-color" content="#1F3864">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Juicios DGR">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icono.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icono-180.png">
+  <link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+  <div class="tope">
+  <header class="barra">
+    <div class="marca">
+      <svg class="marca-icono" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 7h14M7 7l-3 7a3 3 0 0 0 6 0L7 7Zm10 0-3 7a3 3 0 0 0 6 0l-3-7ZM8 21h8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>Juicios DGR</span>
+    </div>
+    <button id="estado-sync" class="pildora" type="button" title="Actualizar ahora"></button>
+    <button id="btn-config" class="icono-btn" type="button" aria-label="Configuración">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </header>
+
+  <div class="buscador">
+    <div class="campo">
+      <svg class="lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      <input id="q" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocorrect="off"
+             autocapitalize="off" spellcheck="false" placeholder="Deudor, Nº de expediente o CUIT" aria-label="Buscar juicio">
+      <button id="btn-limpiar" class="icono-btn chico" type="button" aria-label="Borrar" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+      <button id="btn-voz" class="mic" type="button" aria-label="Buscar por voz" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+  </div>
+  </div>
+
+  <main id="contenido" aria-live="polite"></main>
+
+  <dialog id="dlg-config" class="hoja">
+    <form method="dialog" class="hoja-cuerpo" id="form-config">
+      <h2>Configuración</h2>
+      <p class="ayuda">Pegá el <b>código de configuración</b> que te dio la función <code>configurar()</code> del Apps Script. Se hace una vez por dispositivo.</p>
+      <label class="etiqueta" for="cfg-codigo">Código de configuración</label>
+      <textarea id="cfg-codigo" rows="3" autocomplete="off" spellcheck="false"></textarea>
+      <details class="avanzado">
+        <summary>Cargar URL y clave por separado</summary>
+        <label class="etiqueta" for="cfg-url">URL de la app web (termina en /exec)</label>
+        <input id="cfg-url" type="url" autocomplete="off">
+        <label class="etiqueta" for="cfg-clave">Clave</label>
+        <input id="cfg-clave" type="text" autocomplete="off" spellcheck="false">
+      </details>
+      <p id="cfg-error" class="error" hidden></p>
+      <div class="acciones">
+        <button type="button" class="btn" id="cfg-cancelar">Cancelar</button>
+        <button type="submit" class="btn primario" id="cfg-guardar" value="guardar">Guardar y conectar</button>
+      </div>
+      <section id="cfg-siri" class="siri" hidden>
+        <h3>Atajo de Siri</h3>
+        <p class="ayuda">Para preguntar sin abrir la app: “Oye Siri, <b>juicio</b>” → decís el nombre o el número → Siri te lee el estado. Cómo armarlo:</p>
+        <ol class="ayuda">
+          <li>App <b>Atajos</b> → <b>+</b> → nombre: <b>Juicio</b>.</li>
+          <li>Acción <b>Dictar texto</b> (idioma Español – Argentina).</li>
+          <li>Acción <b>URL</b>: pegá el enlace de abajo y al final agregá la variable <i>Texto dictado</i>.</li>
+          <li>Acción <b>Obtener contenido de URL</b>.</li>
+          <li>Acción <b>Mostrar resultado</b> (Siri lo lee en voz alta).</li>
+        </ol>
+        <button type="button" class="btn" id="cfg-copiar-siri">Copiar enlace para el Atajo</button>
+        <p class="ayuda chica">El enlace incluye tu clave: no lo compartas.</p>
+      </section>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-doc" class="hoja">
+    <div class="hoja-cuerpo">
+      <div class="hoja-cabecera">
+        <h2 id="doc-titulo">Movimiento</h2>
+        <button type="button" class="icono-btn" id="doc-cerrar" aria-label="Cerrar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div id="doc-texto" class="doc-texto"></div>
+    </div>
+  </dialog>
+
+  <div id="aviso" class="aviso" role="status" hidden></div>
+
+  <script src="buscar.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
