@@ -356,7 +356,10 @@
 
   // ───────── Configuración ─────────
   function decodificar(codigo) {
-    var b = codigo.trim().replace(/-/g, '+').replace(/_/g, '/');
+    // Acepta la línea completa del registro ("CÓDIGO DE CONFIGURACIÓN (pegar en la app): eyJ1…"):
+    // el código siempre empieza con "eyJ" (es {"u":… en base64).
+    var m = String(codigo).match(/eyJ[\w\-]+=*/);
+    var b = (m ? m[0] : codigo.trim()).replace(/-/g, '+').replace(/_/g, '/');
     while (b.length % 4) b += '=';
     var json = decodeURIComponent(escape(atob(b)));
     var c = JSON.parse(json);
