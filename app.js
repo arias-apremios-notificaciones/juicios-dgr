@@ -368,6 +368,7 @@
   }
 
   function validarCfg(c) {
+    if (/\/dev$/.test(c.u)) throw new Error('El código trae la dirección de prueba (termina en /dev). Tocá "Cargar URL y clave por separado" y pegá en "URL" la de Implementar → Administrar implementaciones (termina en /exec). El código dejalo como está.');
     // Apps Script en producción, o el servidor de desarrollo local (herramientas/servidor_dev.js).
     if (!/^(https:\/\/script\.google(usercontent)?\.com\/.+|http:\/\/localhost:\d+\/dev)\/exec$/.test(c.u)) throw new Error('La URL tiene que ser la de la app web de Apps Script y terminar en /exec');
     return c;
@@ -377,8 +378,8 @@
     var dlg = $('dlg-config');
     $('cfg-error').hidden = true;
     $('cfg-codigo').value = '';
-    $('cfg-url').value = estado.cfg ? estado.cfg.u : '';
-    $('cfg-clave').value = estado.cfg ? estado.cfg.k : '';
+    $('cfg-url').value = '';
+    $('cfg-clave').value = '';
     $('cfg-siri').hidden = !estado.cfg;
     dlg.showModal();
   }
@@ -397,8 +398,13 @@
       ev.preventDefault();
       var err = $('cfg-error');
       try {
+        // El código trae URL y clave; lo que se escriba en los campos sueltos tiene prioridad
+        // (Google a veces pone en el código la URL /dev en vez de la /exec).
         var codigo = $('cfg-codigo').value.trim();
-        var c = codigo ? decodificar(codigo) : { u: $('cfg-url').value.trim(), k: $('cfg-clave').value.trim() };
+        var c = codigo ? decodificar(codigo) : { u: '', k: '' };
+        var u = $('cfg-url').value.trim(), k = $('cfg-clave').value.trim();
+        if (u) c.u = u;
+        if (k) c.k = k;
         validarCfg(c);
         $('dlg-config').close();
         aplicarCfg(c);
