@@ -326,14 +326,35 @@
   }
 
   // ───────── Voz ─────────
+  // En iPhone/iPad el reconocimiento de voz del navegador se cuelga cuando la app está
+  // instalada en la pantalla de inicio (probado el 22/10/2026). Ahí el botón abre el teclado
+  // para usar el dictado de Apple (micrófono del teclado), que es el más confiable.
+  var ES_IOS = /iP(hone|ad|od)/.test(navigator.userAgent) ||
+               (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
   function iniciarVoz() {
     var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     var btn = $('btn-voz');
+    if (ES_IOS) {
+      btn.hidden = false;
+      btn.addEventListener('click', function () {
+        q.focus();
+        q.select();
+        aviso('Tocá el 🎤 del teclado y decí el nombre o el número');
+      });
+      return;
+    }
     if (!SR) return;   // queda el micrófono del teclado
     btn.hidden = false;
-    var rec = null;
+    var rec = null, vigia = null;
+    function terminar() {
+      clearTimeout(vigia);
+      btn.classList.remove('escuchando');
+      if (rec) { try { rec.abort(); } catch (e) { /* ya terminado */ } }
+      rec = null;
+    }
     btn.addEventListener('click', function () {
-      if (rec) { rec.stop(); return; }
+      if (rec) { terminar(); return; }
       rec = new SR();
       rec.lang = 'es-AR';
       rec.interimResults = true;
@@ -347,10 +368,12 @@
       rec.onerror = function (ev) {
         if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') aviso('Permití el micrófono para buscar por voz');
         else if (ev.error !== 'aborted' && ev.error !== 'no-speech') aviso('No te escuché bien, probá de nuevo');
+        terminar();
       };
-      rec.onend = function () { btn.classList.remove('escuchando'); rec = null; };
+      rec.onend = terminar;
       btn.classList.add('escuchando');
-      try { rec.start(); } catch (e) { btn.classList.remove('escuchando'); rec = null; }
+      vigia = setTimeout(terminar, 10000);   // nunca quedar escuchando para siempre
+      try { rec.start(); } catch (e) { terminar(); }
     });
   }
 
