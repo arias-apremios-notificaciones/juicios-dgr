@@ -409,7 +409,7 @@
       Object.keys(firmar.sel).forEach(function (id) { if (!d.porFirmar.some(function (x) { return x.id === id; })) delete firmar.sel[id]; });
       firmar.cargando = false;
       pintarFirmar();
-      if (d.enCurso) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
+      if (d.enCurso || d.uniendoArca) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
     }).catch(function (e) {
       firmar.cargando = false;
       $('firmar').textContent = '';
@@ -461,8 +461,20 @@
         h('div', { text: 'Bajala de ARCA y guardala en la carpeta CONSTANCIA ARCA: cada pedido de sentencia se sube junto con ella.' }),
         h('div', { style: 'margin-top:6px' }, h('a', { href: d.arca.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir carpeta CONSTANCIA ARCA ↗' }))));
     } else if (d.arca && d.arca.archivo) {
-      cont.appendChild(h('div', { class: 'panel ok-arca' }, '✓ Constancia de ARCA de ' + d.arca.mes.toLowerCase() + ': ',
-        h('a', { href: d.arca.archivo.url, target: '_blank', rel: 'noopener', text: d.arca.archivo.nombre })));
+      var sinArca = d.porFirmar.filter(function (x) { return !x.arca; }).length;
+      var panelArca = h('div', { class: 'panel ok-arca' }, '✓ Constancia de ARCA de ' + d.arca.mes.toLowerCase() + ': ',
+        h('a', { href: d.arca.archivo.url, target: '_blank', rel: 'noopener', text: d.arca.archivo.nombre }));
+      if (d.uniendoArca) panelArca.appendChild(h('div', { class: 'ayuda chica', text: 'Uniendo la constancia a los escritos… (unos minutos)' }));
+      else if (sinArca) {
+        var btnArca = h('button', { class: 'btn', type: 'button', style: 'margin-top:8px' }, 'Unir la constancia a ' + sinArca + (sinArca === 1 ? ' escrito' : ' escritos'));
+        btnArca.addEventListener('click', function () {
+          btnArca.disabled = true;
+          api({ a: 'adjuntarArca' }).then(function () { aviso('Uniendo la constancia: tarda unos minutos'); setTimeout(cargarFirmar, 5000); })
+            .catch(function (e) { btnArca.disabled = false; aviso('No se pudo: ' + e.message); });
+        });
+        panelArca.appendChild(h('div', null, btnArca));
+      }
+      cont.appendChild(panelArca);
     }
 
     // Escritos para firmar, por año del juicio
@@ -528,6 +540,7 @@
       h('div', { class: 'meta' },
         h('span', { class: 'expte', text: 'Expte. ' + x.e }),
         h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : ''), text: /REITERO/.test(x.tipo) ? 'REITERO' : 'PIDO SENTENCIA' }),
+        h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: x.arca ? '📎 con ARCA' : 'sin ARCA' }),
         h('span', { text: x.motivo })),
       x.aviso ? h('div', { class: 'alerta', text: '⚠ ' + x.aviso }) : null,
       h('div', { class: 'botones' },
