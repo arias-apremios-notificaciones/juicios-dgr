@@ -389,8 +389,10 @@
     $('barra-buscar').hidden = v !== 'buscar';
     contenido.hidden = v !== 'buscar';
     $('firmar').hidden = v !== 'firmar';
+    $('escritos').hidden = v !== 'escritos';
     actualizarBarraAcciones();
     if (v === 'firmar') cargarFirmar();
+    else if (v === 'escritos') pintarEscritos();
     else render();
     window.scrollTo(0, 0);
   }
@@ -582,6 +584,114 @@
       aviso('Escrito descartado');
       cargarFirmar();
     }).catch(function (e) { aviso('No se pudo: ' + e.message); });
+  }
+
+  // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
+  var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' }];
+  var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false };
+
+  var LECTURA_MOTOR = {
+    PEDIR: ['ok', 'El motor también pediría sentencia'],
+    REITERAR: ['ok', 'Corresponde reiterar el pedido'],
+    ESPERAR: ['aviso', 'El motor esperaría'],
+    REVISION: ['aviso', 'El motor lo mandaría a revisión manual'],
+    NO: ['aviso', 'Según el motor todavía no corresponde'],
+    SENTENCIA_DICTADA: ['peligro', 'Ojo: el SAE ya tiene sentencia']
+  };
+
+  function pintarEscritos() {
+    var cont = $('escritos');
+    cont.textContent = '';
+    if (!estado.cfg) { cont.appendChild(h('p', { class: 'ayuda', text: 'Configurá la app primero (engranaje).' })); return; }
+
+    var sel = h('select', { id: 'man-tipo', class: 'campo-form' });
+    TIPOS_ESCRITO.forEach(function (t) { var o = h('option', { value: t.id, text: t.nombre }); if (t.id === manual.tipo) o.selected = true; sel.appendChild(o); });
+    sel.addEventListener('change', function () { manual.tipo = sel.value; });
+    var inp = h('input', { id: 'man-expte', class: 'campo-form', type: 'search', inputmode: 'search', autocomplete: 'off', autocorrect: 'off',
+                           spellcheck: 'false', placeholder: 'Ej. 10420/26 o parte del nombre', value: manual.texto });
+    var lista = h('div', { class: 'man-lista' });
+    var mostrarCoincidencias = function () {
+      manual.texto = inp.value;
+      lista.textContent = '';
+      var t = inp.value.trim();
+      if (!t || manual.fila && manual.fila.e === t) return;
+      Buscador.buscar(estado.indice, t, 6).forEach(function (r) {
+        var f = estado.filas[r.i];
+        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { elegirJuicio(f); } },
+          h('b', { text: f.d }), h('span', { text: 'Expte. ' + f.e + ' · ' + Buscador.nominacion(f.n).texto + ' · ' + (f.g || '') })));
+      });
+      if (!lista.firstChild) lista.appendChild(h('p', { class: 'ayuda chica', text: 'No hay coincidencias en la planilla.' }));
+    };
+    inp.addEventListener('input', function () { manual.fila = null; manual.previa = null; manual.resultado = null; manual.error = ''; pintarEleccion(); mostrarCoincidencias(); });
+
+    cont.appendChild(h('div', { class: 'panel' },
+      h('h2', { text: 'Nuevo escrito' }),
+      h('label', { class: 'etiqueta', for: 'man-tipo', text: 'Tipo de escrito' }), sel,
+      h('label', { class: 'etiqueta', for: 'man-expte', text: 'Expediente o deudor' }), inp, lista,
+      h('p', { class: 'ayuda chica', text: 'Más tipos de escritos se suman a medida que se sellen sus modelos.' })));
+    cont.appendChild(h('div', { id: 'man-eleccion' }));
+    if (!manual.fila) mostrarCoincidencias();
+    pintarEleccion();
+  }
+
+  function elegirJuicio(f) {
+    manual.fila = f; manual.texto = f.e; manual.previa = null; manual.resultado = null; manual.error = '';
+    var inp = $('man-expte'); if (inp) inp.value = f.e;
+    var lista = document.querySelector('.man-lista'); if (lista) lista.textContent = '';
+    pintarEleccion();
+    api({ a: 'previa', e: f.e }).then(function (p) {
+      if (manual.fila !== f) return;
+      manual.previa = p; pintarEleccion();
+    }).catch(function (e) { if (manual.fila === f) { manual.error = e.message; pintarEleccion(); } });
+  }
+
+  function pintarEleccion() {
+    var caja = $('man-eleccion');
+    if (!caja) return;
+    caja.textContent = '';
+    var f = manual.fila;
+    if (!f) return;
+    var tarjeta = h('div', { class: 'panel' },
+      h('div', { class: 'fila1' }, h('div', { class: 'deudor', text: f.d }), h('span', { class: 'estado ' + (COLOR_ESTADO[f.g] || ''), text: f.g || 'SIN ESTADO' })),
+      h('div', { class: 'fila2' }, h('span', { class: 'expte', text: 'Expte. ' + f.e }), h('span', { text: Buscador.nominacion(f.n).texto })));
+    caja.appendChild(tarjeta);
+
+    if (manual.resultado) {
+      var r = manual.resultado;
+      caja.appendChild(h('div', { class: 'panel caja-ok' },
+        h('b', { text: '✓ Escrito generado' }),
+        h('div', { text: r.arca ? 'En un minuto se le une la constancia de ARCA. Lo encontrás en Para firmar.' : 'Falta la constancia de ARCA del mes: guardala en su carpeta y se une sola.' }),
+        h('div', { class: 'botones', style: 'margin-top:8px' },
+          h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+          h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'),
+          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; pintarEscritos(); } }, 'Otro escrito'))));
+      return;
+    }
+    if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
+    if (!manual.previa) { caja.appendChild(h('div', { class: 'cargando-txt', text: 'Consultando el SAE…' })); return; }
+
+    var p = manual.previa;
+    if (!p.ok) { caja.appendChild(h('p', { class: 'error', text: p.error })); return; }
+    var lect = LECTURA_MOTOR[p.motor.decision] || ['aviso', p.motor.decision];
+    if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', style: 'margin-top:6px', text: p.sae.caratula }));
+    caja.appendChild(h('div', { class: 'panel caja-' + lect[0] },
+      h('b', { text: lect[1] }),
+      h('div', { text: p.motor.motivo + (p.motor.detalle ? ' — ' + p.motor.detalle : '') }),
+      p.motor.verificar ? h('div', { class: 'ayuda chica', text: 'Verificá que la intimación haya sido positiva.' }) : null));
+    if (p.pendiente) caja.appendChild(h('div', { class: 'alerta', text: 'Ya hay un escrito de este expediente esperando firma (pestaña Para firmar).' }));
+
+    var btn = h('button', { class: 'btn primario', type: 'button', disabled: manual.generando }, manual.generando ? 'Generando…' : 'Generar escrito');
+    btn.addEventListener('click', function () {
+      var riesgo = p.motor.decision === 'SENTENCIA_DICTADA' || p.motor.decision === 'NO';
+      if ((riesgo || p.pendiente) && !confirm((p.pendiente ? 'Ya hay un escrito para firmar de este expediente. ' : '') +
+          (riesgo ? 'El motor no lo recomienda (' + p.motor.motivo + '). ' : '') + '¿Generar igual?')) return;
+      manual.generando = true; pintarEleccion();
+      apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente }).then(function (r) {
+        manual.generando = false; manual.resultado = r; pintarEleccion();
+        firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
+      }).catch(function (e) { manual.generando = false; manual.error = e.message; pintarEleccion(); });
+    });
+    caja.appendChild(h('div', { class: 'botones' }, btn));
   }
 
   // ───────── Configuración ─────────
