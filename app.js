@@ -371,6 +371,206 @@
     });
   }
 
+  // ───────── Para firmar (motor de escritos) ─────────
+  var firmar = { datos: null, sel: {}, cargando: false };
+
+  function apiPost(cuerpo) {
+    var cfg = estado.cfg;
+    if (!cfg) return Promise.reject(new Error('Falta configurar la app'));
+    // Texto plano: así el navegador no hace el control previo de CORS que Apps Script no responde.
+    return fetch(cfg.u, { method: 'POST', body: JSON.stringify(Object.assign({ k: cfg.k }, cuerpo)), redirect: 'follow' })
+      .then(function (r) { if (!r.ok) throw new Error('Error ' + r.status); return r.json(); })
+      .then(function (j) { if (!j.ok) throw new Error(j.error || 'Error del servidor'); return j; });
+  }
+
+  function cambiarVista(v) {
+    estado.vista = v;
+    document.querySelectorAll('.pestana').forEach(function (b) { b.classList.toggle('activa', b.dataset.vista === v); });
+    $('barra-buscar').hidden = v !== 'buscar';
+    contenido.hidden = v !== 'buscar';
+    $('firmar').hidden = v !== 'firmar';
+    actualizarBarraAcciones();
+    if (v === 'firmar') cargarFirmar();
+    else render();
+    window.scrollTo(0, 0);
+  }
+
+  function verJuicio(expte) {
+    q.value = expte;
+    cambiarVista('buscar');
+  }
+
+  function cargarFirmar() {
+    if (!estado.cfg || firmar.cargando) return;
+    firmar.cargando = true;
+    if (!firmar.datos) pintarFirmar();
+    api({ a: 'escritos' }).then(function (d) {
+      firmar.datos = d;
+      Object.keys(firmar.sel).forEach(function (id) { if (!d.porFirmar.some(function (x) { return x.id === id; })) delete firmar.sel[id]; });
+      firmar.cargando = false;
+      pintarFirmar();
+      if (d.enCurso) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
+    }).catch(function (e) {
+      firmar.cargando = false;
+      $('firmar').textContent = '';
+      $('firmar').appendChild(h('p', { class: 'error', text: 'No se pudo cargar: ' + e.message }));
+    });
+  }
+
+  function contarFirmar(n) {
+    var c = $('cuenta-firmar');
+    c.textContent = String(n);
+    c.hidden = !n;
+  }
+
+  function porAnio(lista) {
+    var g = {};
+    lista.forEach(function (x) { (g[x.anio] = g[x.anio] || []).push(x); });
+    return Object.keys(g).sort(function (a, b) { return b - a; }).map(function (a) { return { anio: a, items: g[a] }; });
+  }
+
+  function pintarFirmar() {
+    var cont = $('firmar'), d = firmar.datos;
+    cont.textContent = '';
+    if (!d) { cont.appendChild(h('div', { class: 'cargando-txt', text: 'Cargando escritos…' })); return; }
+    if (!d.instalado) {
+      cont.appendChild(h('div', { class: 'vacio' }, h('h2', { text: 'El motor todavía no está instalado' }),
+        h('p', { text: 'En Apps Script, ejecutá la función instalarMotor (una sola vez).' })));
+      return;
+    }
+    contarFirmar(d.porFirmar.length);
+
+    // Estado del análisis
+    var info = d.enCurso ? 'Analizando la cartera…' + (d.quedan ? ' quedan ' + d.quedan + ' juicios' : '')
+                         : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite cada 15 días' : 'Todavía no se analizó la cartera');
+    var btnAnalizar = h('button', { class: 'btn', type: 'button', disabled: d.enCurso }, d.enCurso ? 'Analizando…' : 'Analizar ahora');
+    btnAnalizar.addEventListener('click', function () {
+      btnAnalizar.disabled = true;
+      api({ a: 'analizar' }).then(function () { aviso('Análisis en marcha: tarda unos minutos'); setTimeout(cargarFirmar, 3000); })
+        .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + e.message); });
+    });
+    cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
+      h('div', null, h('h2', { text: 'Pedidos de sentencia' }), h('div', { class: 'ayuda chica', text: info })),
+      btnAnalizar),
+      h('div', { class: 'ayuda chica' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }))));
+
+    // Constancia de ARCA del mes
+    if (d.arca && !d.arca.alDia) {
+      cont.appendChild(h('div', { class: 'panel aviso-arca' },
+        h('b', { text: '⚠ Falta la constancia de ARCA de ' + d.arca.mes.toLowerCase() }),
+        h('div', { text: 'Bajala de ARCA y guardala en la carpeta CONSTANCIA ARCA: cada pedido de sentencia se sube junto con ella.' }),
+        h('div', { style: 'margin-top:6px' }, h('a', { href: d.arca.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir carpeta CONSTANCIA ARCA ↗' }))));
+    } else if (d.arca && d.arca.archivo) {
+      cont.appendChild(h('div', { class: 'panel ok-arca' }, '✓ Constancia de ARCA de ' + d.arca.mes.toLowerCase() + ': ',
+        h('a', { href: d.arca.archivo.url, target: '_blank', rel: 'noopener', text: d.arca.archivo.nombre })));
+    }
+
+    // Escritos para firmar, por año del juicio
+    if (!d.porFirmar.length) {
+      cont.appendChild(h('div', { class: 'vacio' }, h('h2', { text: 'No hay escritos para firmar' }),
+        h('p', { text: d.enCurso ? 'Esperá a que termine el análisis.' : 'El próximo análisis los va a generar si corresponde.' })));
+    }
+    porAnio(d.porFirmar).forEach(function (g) {
+      cont.appendChild(h('div', { class: 'anio' }, 'Juicios ' + g.anio, h('small', { text: g.items.length + (g.items.length === 1 ? ' escrito' : ' escritos') })));
+      g.items.forEach(function (x) { cont.appendChild(tarjetaEscrito(x)); });
+    });
+
+    // Revisión manual
+    if (d.revision.length) {
+      var det = h('details', { class: 'grupo' }, h('summary', { text: 'Revisión manual (' + d.revision.length + ')' }),
+        h('p', { class: 'ayuda chica', text: 'El motor no genera escritos para estos juicios: necesitan tu criterio. Tocá uno para ver su ficha.' }));
+      porAnio(d.revision).forEach(function (g) {
+        det.appendChild(h('div', { class: 'anio' }, 'Juicios ' + g.anio, h('small', { text: String(g.items.length) })));
+        g.items.forEach(function (x) {
+          det.appendChild(h('div', { class: 'item-rev', onclick: function () { verJuicio(x.e); } },
+            h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · ' + x.g }),
+            h('div', { class: 'motivo', text: x.motivo + (x.detalle ? ' — ' + x.detalle : '') })));
+        });
+      });
+      cont.appendChild(det);
+    }
+
+    // Juicios que ya tienen sentencia en el SAE: cambiar el ESTADO del MAESTRO (con aprobación)
+    if (d.sentenciaYa.length) {
+      var marcados = {};
+      d.sentenciaYa.forEach(function (x) { marcados[x.e] = true; });
+      var btn = h('button', { class: 'btn primario', type: 'button' });
+      var refrescarBtn = function () { var n = Object.keys(marcados).length; btn.textContent = 'Cambiar ESTADO a SENTENCIA (' + n + ')'; btn.disabled = !n; };
+      var det2 = h('details', { class: 'grupo' }, h('summary', { text: 'Ya tienen sentencia en el SAE (' + d.sentenciaYa.length + ')' }),
+        h('p', { class: 'ayuda chica', text: 'En el MAESTRO figuran como INTIMACION / AUTOS P/RESOLVER, pero el SAE ya muestra la sentencia. Destildá los que no quieras cambiar.' }));
+      d.sentenciaYa.forEach(function (x) {
+        var chk = h('input', { type: 'checkbox', checked: true });
+        chk.addEventListener('change', function () { if (chk.checked) marcados[x.e] = true; else delete marcados[x.e]; refrescarBtn(); });
+        det2.appendChild(h('div', { class: 'item-rev' }, h('label', null, chk,
+          h('span', null, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · ' + x.g + ' → SENTENCIA' + (x.sentencia ? ' (del ' + x.sentencia + ')' : '') })))));
+      });
+      btn.addEventListener('click', function () {
+        var lista = Object.keys(marcados);
+        if (!confirm('Se va a cambiar el ESTADO a SENTENCIA en el MAESTRO para ' + lista.length + ' juicio(s). ¿Confirmás?')) return;
+        btn.disabled = true;
+        apiPost({ a: 'aprobarSentencia', exptes: lista }).then(function (r) {
+          aviso('ESTADO actualizado en ' + r.actualizados.length + ' juicio(s)');
+          refrescar(true); cargarFirmar();
+        }).catch(function (e) { btn.disabled = false; aviso('No se pudo: ' + e.message); });
+      });
+      refrescarBtn();
+      det2.appendChild(h('div', { class: 'botones' }, btn));
+      cont.appendChild(det2);
+    }
+    actualizarBarraAcciones();
+  }
+
+  function tarjetaEscrito(x) {
+    var chk = h('input', { type: 'checkbox', checked: !!firmar.sel[x.id], 'aria-label': 'Seleccionar ' + x.d });
+    var card = h('div', { class: 'escrito' + (firmar.sel[x.id] ? ' marcado' : '') },
+      chk,
+      h('div', { class: 'deudor', text: x.d }),
+      h('div', { class: 'meta' },
+        h('span', { class: 'expte', text: 'Expte. ' + x.e }),
+        h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : ''), text: /REITERO/.test(x.tipo) ? 'REITERO' : 'PIDO SENTENCIA' }),
+        h('span', { text: x.motivo })),
+      x.aviso ? h('div', { class: 'alerta', text: '⚠ ' + x.aviso }) : null,
+      h('div', { class: 'botones' },
+        h('a', { class: 'btn primario', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { descartar(x); } }, 'Descartar')));
+    chk.addEventListener('change', function () {
+      if (chk.checked) firmar.sel[x.id] = true; else delete firmar.sel[x.id];
+      card.classList.toggle('marcado', chk.checked);
+      actualizarBarraAcciones();
+    });
+    return card;
+  }
+
+  function actualizarBarraAcciones() {
+    var n = Object.keys(firmar.sel).length;
+    $('barra-acciones').hidden = !(estado.vista === 'firmar' && n);
+    $('acciones-texto').textContent = n + (n === 1 ? ' seleccionado' : ' seleccionados');
+  }
+
+  function marcarPresentados() {
+    var ids = Object.keys(firmar.sel);
+    if (!ids.length) return;
+    if (!confirm('¿Ya firmaste y subiste al SAE ' + (ids.length === 1 ? 'este escrito' : 'estos ' + ids.length + ' escritos') +
+                 '?\n\nSe va a anotar "PIDO SENTENCIA" con la fecha de hoy en el seguimiento del MAESTRO.')) return;
+    $('btn-presentados').disabled = true;
+    apiPost({ a: 'presentado', ids: ids }).then(function (r) {
+      $('btn-presentados').disabled = false;
+      firmar.sel = {};
+      aviso('Anotado en el MAESTRO: ' + r.presentados.length + ' juicio(s)' + (r.noEncontrados.length ? ' · no encontrados: ' + r.noEncontrados.join(', ') : ''));
+      refrescar(true); cargarFirmar();
+    }).catch(function (e) { $('btn-presentados').disabled = false; aviso('No se pudo: ' + e.message); });
+  }
+
+  function descartar(x) {
+    if (!confirm('¿Descartar el escrito de ' + x.d + ' (' + x.e + ')? El PDF va a la papelera de Drive.')) return;
+    apiPost({ a: 'descartar', ids: [x.id] }).then(function () {
+      delete firmar.sel[x.id];
+      aviso('Escrito descartado');
+      cargarFirmar();
+    }).catch(function (e) { aviso('No se pudo: ' + e.message); });
+  }
+
   // ───────── Configuración ─────────
   function decodificar(codigo) {
     // Acepta la línea completa del registro ("CÓDIGO DE CONFIGURACIÓN (pegar en la app): eyJ1…"):
@@ -458,6 +658,10 @@
 
     iniciarConfig();
     iniciarVoz();
+    estado.vista = 'buscar';
+    document.querySelectorAll('.pestana').forEach(function (b) { b.addEventListener('click', function () { cambiarVista(b.dataset.vista); }); });
+    $('btn-presentados').addEventListener('click', marcarPresentados);
+    if (estado.cfg) api({ a: 'escritos' }).then(function (d) { firmar.datos = d; if (d.porFirmar) contarFirmar(d.porFirmar.length); }).catch(function () {});
     q.addEventListener('input', render);
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });
     $('btn-limpiar').addEventListener('click', function () { q.value = ''; render(); q.focus(); });

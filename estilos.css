@@ -227,3 +227,47 @@ ol.ayuda { padding-left: 20px; }
 .seccion { margin-top: 12px; border: 1px solid var(--borde); border-radius: 12px; background: var(--superficie); padding: 12px; }
 .seccion h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .5px; color: var(--enfasis); margin: 0 0 8px; font-weight: 700; }
 .seccion .sae { border: 0; padding: 0; margin-top: 10px; background: transparent; }
+
+/* ───────── Pestañas ───────── */
+.pestanas { display: flex; gap: 6px; padding: 0 16px 2px; max-width: 760px; margin: 0 auto; }
+.pestana { flex: 1; border: 0; background: rgba(255,255,255,.10); color: rgba(255,255,255,.85); border-radius: 10px 10px 0 0;
+  padding: 9px 10px; font-size: 15px; font-weight: 600; cursor: pointer; display: inline-flex; justify-content: center; align-items: center; gap: 6px; }
+.pestana.activa { background: var(--fondo); color: var(--enfasis); }
+.contador { background: var(--rojo); color: #fff; border-radius: 999px; font-size: 12px; padding: 1px 7px; min-width: 20px; }
+.pestana.activa .contador { background: var(--azul); }
+
+/* ───────── Para firmar ───────── */
+#firmar { max-width: 760px; margin: 0 auto; padding: 14px 16px 110px; }
+.panel { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; margin-bottom: 12px; box-shadow: var(--sombra); }
+.panel h2 { font-size: 16px; margin: 0 0 4px; }
+.panel .fila-panel { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.panel.aviso-arca { background: var(--e-amarillo-bg); color: var(--e-amarillo-tx); border-color: transparent; }
+.panel.ok-arca { background: var(--e-verde-bg); color: var(--e-verde-tx); border-color: transparent; padding: 9px 14px; font-size: 14.5px; }
+.panel a { color: inherit; font-weight: 600; }
+.anio { font-size: 15px; font-weight: 700; color: var(--enfasis); margin: 18px 2px 8px; display: flex; justify-content: space-between; align-items: baseline; }
+.anio small { font-weight: 500; color: var(--texto-2); font-size: 13px; }
+.escrito { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px; margin-bottom: 8px;
+  display: grid; grid-template-columns: 30px 1fr; gap: 4px 8px; box-shadow: var(--sombra); }
+.escrito.marcado { border-color: var(--azul-claro); box-shadow: 0 0 0 2px rgba(46,80,144,.25); }
+.escrito input[type=checkbox] { width: 22px; height: 22px; margin: 2px 0 0; accent-color: var(--azul); }
+.escrito .deudor { font-size: 15.5px; }
+.escrito .meta { grid-column: 2; color: var(--texto-2); font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.escrito .botones { grid-column: 2; margin-top: 6px; }
+.escrito .botones .btn { min-height: 36px; padding: 6px 11px; font-size: 14px; }
+.chip-tipo { font-size: 11.5px; font-weight: 700; letter-spacing: .3px; padding: 2px 8px; border-radius: 6px; background: var(--e-verde-bg); color: var(--e-verde-tx); }
+.chip-tipo.reitero { background: var(--e-naranja-bg); color: var(--e-naranja-tx); }
+.escrito .alerta { grid-column: 2; margin: 4px 0 0; }
+details.grupo { margin-top: 16px; }
+details.grupo > summary { cursor: pointer; font-weight: 700; color: var(--enfasis); font-size: 15px; padding: 8px 2px; list-style: none; }
+details.grupo > summary::before { content: "▸ "; }
+details.grupo[open] > summary::before { content: "▾ "; }
+.item-rev { background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; padding: 10px 12px; margin-bottom: 6px; cursor: pointer; }
+.item-rev b { font-size: 14.5px; }
+.item-rev .meta { color: var(--texto-2); font-size: 13.5px; margin-top: 2px; }
+.item-rev .motivo { font-size: 13.5px; margin-top: 3px; color: var(--e-naranja-tx); }
+.item-rev label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+.item-rev input { width: 20px; height: 20px; accent-color: var(--azul); margin-top: 2px; }
+.barra-acciones { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--superficie); border-top: 1px solid var(--borde);
+  padding: 10px 16px calc(env(safe-area-inset-bottom) + 10px); display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  box-shadow: 0 -6px 20px rgba(0,0,0,.12); }
+.barra-acciones span { font-size: 14.5px; color: var(--texto-2); }

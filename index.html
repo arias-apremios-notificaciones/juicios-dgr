@@ -29,7 +29,11 @@
     </button>
   </header>
 
-  <div class="buscador">
+  <nav class="pestanas" role="tablist">
+    <button type="button" class="pestana activa" data-vista="buscar" role="tab">Buscar</button>
+    <button type="button" class="pestana" data-vista="firmar" role="tab">Para firmar <span id="cuenta-firmar" class="contador" hidden></span></button>
+  </nav>
+  <div class="buscador" id="barra-buscar">
     <div class="campo">
       <svg class="lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="m20 20-3.5-3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       <input id="q" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocorrect="off"
@@ -45,6 +49,11 @@
   </div>
 
   <main id="contenido" aria-live="polite"></main>
+  <main id="firmar" hidden></main>
+  <div id="barra-acciones" class="barra-acciones" hidden>
+    <span id="acciones-texto"></span>
+    <button type="button" class="btn primario" id="btn-presentados">Marcar como presentados</button>
+  </div>
 
   <dialog id="dlg-config" class="hoja">
     <form method="dialog" class="hoja-cuerpo" id="form-config">
