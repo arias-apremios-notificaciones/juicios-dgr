@@ -216,31 +216,25 @@
       dato('CUIT', cuit(f.c)),
       dato('Último mov.', ultimoMovIso(f) ? ultimoMovIso(f).split('-').reverse().join('/') : '—'),
       dato('Fila MAESTRO', String(f.r))));
-    det.appendChild(h('div', { class: 'botones' },
-      btnSae,
-      h('button', { class: 'btn', type: 'button', onclick: function () { copiar(f.e, 'Expediente copiado'); } }, 'Copiar Nº'),
-      h('a', { class: 'btn', href: PORTAL_SAE, target: '_blank', rel: 'noopener',
-               onclick: function () { copiar(f.e); } }, 'Portal SAE ↗')));
-    if (f.s === 'DUDOSO') det.appendChild(h('div', { class: 'alerta', text: 'Ojo: la carátula del SAE no coincide del todo con el deudor. Verificala.' }));
-    det.appendChild(saeCaja);
+    // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
+    var ul = h('ul', { class: 'lista-seg' });
+    lineas.forEach(function (l) {
+      ul.appendChild(h('li', null, h('span', { class: 'f', text: l.fecha || '—' }), h('span', { text: l.texto })));
+    });
+    det.appendChild(h('section', { class: 'seccion' },
+      h('h3', { text: 'Seguimiento · MAESTRO' + (lineas.length ? ' (' + lineas.length + ')' : '') }),
+      lineas.length ? ul : h('p', { class: 'ayuda chica', text: 'Sin seguimiento cargado en la planilla.' })));
 
-    if (lineas.length) {
-      var ul = h('ul', { class: 'lista-seg' });
-      var mostrar = function (n) {
-        ul.textContent = '';
-        lineas.slice(0, n).forEach(function (l) {
-          ul.appendChild(h('li', null, h('span', { class: 'f', text: l.fecha || '—' }), h('span', { text: l.texto })));
-        });
-      };
-      mostrar(5);
-      var bloque = h('div', { class: 'bloque' }, h('h3', { text: 'Seguimiento (' + lineas.length + ')' }), ul);
-      if (lineas.length > 5) {
-        var mas = h('button', { class: 'mas', type: 'button', text: 'Ver las ' + lineas.length + ' líneas' });
-        mas.addEventListener('click', function () { mostrar(lineas.length); mas.remove(); });
-        bloque.appendChild(mas);
-      }
-      det.appendChild(bloque);
-    }
+    // 2) EXPEDIENTE en el SAE (lo que dice el juzgado), a pedido.
+    det.appendChild(h('section', { class: 'seccion' },
+      h('h3', { text: 'Expediente · SAE' }),
+      h('div', { class: 'botones' },
+        btnSae,
+        h('button', { class: 'btn', type: 'button', onclick: function () { copiar(f.e, 'Expediente copiado'); } }, 'Copiar Nº'),
+        h('a', { class: 'btn', href: PORTAL_SAE, target: '_blank', rel: 'noopener',
+                 onclick: function () { copiar(f.e); } }, 'Portal SAE ↗')),
+      f.s === 'DUDOSO' ? h('div', { class: 'alerta', text: 'Ojo: la carátula del SAE no coincide del todo con el deudor. Verificala.' }) : null,
+      saeCaja));
   }
 
   function dato(t, v) { return h('div', null, h('dt', { text: t }), h('dd', { text: v })); }
