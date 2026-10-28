@@ -104,6 +104,8 @@
     estado.maestro = datos.maestro || null;
     var b = $('btn-maestro');
     if (estado.maestro && estado.maestro.url) { b.href = estado.maestro.url; b.hidden = false; }
+    var bh = $('btn-honorarios');
+    if (datos.honorarios && datos.honorarios.url) { bh.href = datos.honorarios.url; bh.hidden = false; }
   }
 
   /** Enlace al MAESTRO posicionado en la fila del juicio (para editarlo directo). */
@@ -674,7 +676,66 @@
   }
 
   // ───────── Honorarios: tablero de cobro (la planilla HONORARIOS es el archivo principal; la app solo la lee) ─────────
-  var hon = { datos: null, cargando: false, periodo: 'semana' };
+  // PIN: lo verifica el servidor; acá vive solo en memoria (no se guarda en el teléfono) y se borra al bloquear.
+  var hon = { datos: null, cargando: false, periodo: 'semana', soloColor: '', pin: null, pinEstado: null, msgPin: '', ultimoUso: 0, oculto: 0 };
+  var HON_INACTIVO_MS = 10 * 60 * 1000, HON_FUERA_MS = 2 * 60 * 1000;
+
+  function bloquearHon(msg) {
+    hon.pin = null; hon.datos = null; hon.msgPin = msg || '';
+    if (estado.vista === 'honorarios') pintarPin();
+  }
+  function usoHon() { hon.ultimoUso = Date.now(); }
+  setInterval(function () { if (hon.pin && Date.now() - hon.ultimoUso > HON_INACTIVO_MS) bloquearHon('Se bloqueó por 10 minutos sin uso.'); }, 30000);
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) hon.oculto = Date.now();
+    else if (hon.pin && hon.oculto && Date.now() - hon.oculto > HON_FUERA_MS) bloquearHon('Se bloqueó porque saliste de la app.');
+  });
+
+  function pintarPin() {
+    var cont = $('honorarios');
+    cont.textContent = '';
+    if (hon.pinEstado === null) {
+      cont.appendChild(h('div', { class: 'cargando-txt', text: 'Un momento…' }));
+      apiPost({ a: 'honPinEstado' }).then(function (r) { hon.pinEstado = r.configurado; pintarPin(); })
+        .catch(function (e) { cont.textContent = ''; cont.appendChild(h('p', { class: 'error', text: 'No se pudo: ' + traducirError(e) })); });
+      return;
+    }
+    var crear = !hon.pinEstado;
+    var p1 = h('input', { class: 'campo-form campo-pin', type: 'password', inputmode: 'numeric', autocomplete: crear ? 'new-password' : 'current-password', maxlength: '8', placeholder: crear ? 'PIN nuevo (4 a 8 números)' : 'PIN', 'aria-label': 'PIN' });
+    var p2 = crear ? h('input', { class: 'campo-form campo-pin', type: 'password', inputmode: 'numeric', autocomplete: 'new-password', maxlength: '8', placeholder: 'Repetilo', 'aria-label': 'Repetir PIN' }) : null;
+    var msg = h('p', { class: 'ayuda chica pin-msg', text: hon.msgPin });
+    var btn = h('button', { class: 'btn primario', type: 'submit' }, crear ? 'Crear PIN y entrar' : 'Entrar');
+    var form = h('form', { class: 'panel caja-pin' },
+      h('div', { class: 'candado', text: '🔒' }),
+      h('h2', { text: crear ? 'Creá un PIN para Honorarios' : 'Honorarios' }),
+      h('p', { class: 'ayuda chica', text: crear ? 'Protege tus honorarios aunque alguien use la app en tu teléfono o en la computadora del trabajo. No se guarda en el dispositivo: se pide cada vez que entrás.'
+                                             : 'Ingresá tu PIN. Se vuelve a pedir después de 10 minutos sin uso o si salís de la app.' }),
+      p1, p2, msg, btn);
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var a = p1.value.trim();
+      if (!/^\d{4,8}$/.test(a)) { msg.textContent = 'El PIN tiene que tener entre 4 y 8 números.'; return; }
+      if (crear && a !== p2.value.trim()) { msg.textContent = 'Los dos PIN no coinciden.'; return; }
+      btn.disabled = true;
+      (crear ? apiPost({ a: 'honPin', nuevo: a }) : Promise.resolve()).then(function () {
+        hon.pinEstado = true; hon.pin = a; hon.msgPin = ''; usoHon();
+        cargarHonorarios();
+      }).catch(function (e) { btn.disabled = false; msg.textContent = traducirError(e); });
+    });
+    cont.appendChild(form);
+    setTimeout(function () { p1.focus(); }, 50);
+  }
+
+  function cambiarPin() {
+    var actual = prompt('PIN actual:');
+    if (actual === null) return;
+    var nuevo = prompt('PIN nuevo (4 a 8 números):');
+    if (nuevo === null) return;
+    if (!/^\d{4,8}$/.test(nuevo.trim())) { aviso('El PIN tiene que tener entre 4 y 8 números'); return; }
+    if (prompt('Repetí el PIN nuevo:') !== nuevo) { aviso('Los PIN no coinciden'); return; }
+    apiPost({ a: 'honPin', actual: actual.trim(), nuevo: nuevo.trim() }).then(function () { hon.pin = nuevo.trim(); aviso('PIN cambiado'); })
+      .catch(function (e) { aviso(traducirError(e)); });
+  }
   var TIPOS_CRUCE = {
     COBRO_SIN_FECHA: 'Dice que se cobró, pero falta la FECHA DE PAGO',
     COBRADO_MAESTRO: 'Ya cobrados: falta cambiar el ESTADO en el MAESTRO',
@@ -696,14 +757,20 @@
 
   function cargarHonorarios() {
     if (!estado.cfg || hon.cargando) return;
+    if (!hon.pin) { pintarPin(); return; }
     hon.cargando = true;
     if (!hon.datos) pintarHonorarios();
-    api({ a: 'honorarios' }).then(function (d) {
-      hon.datos = d; hon.cargando = false;
-      pintarHonorarios();
-      if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios') cargarHonorarios(); }, 30000);
+    apiPost({ a: 'honorarios', pin: hon.pin }).then(function (d) {
+      hon.cargando = false;
+      if (!hon.pin) return;                                    // se bloqueó mientras cargaba
+      hon.datos = d;
+      if (estado.vista === 'honorarios') pintarHonorarios();
+      if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios' && hon.pin) cargarHonorarios(); }, 30000);
     }).catch(function (e) {
       hon.cargando = false;
+      var m = String(e.message || e);
+      if (/^SIN_PIN/.test(m)) { hon.pinEstado = false; return bloquearHon(''); }
+      if (/^PIN_(INCORRECTO|BLOQUEADO)/.test(m)) return bloquearHon(m.replace(/^PIN_INCORRECTO: /, 'PIN incorrecto: ').replace(/^PIN_BLOQUEADO: /, 'Bloqueado: '));
       $('honorarios').textContent = '';
       $('honorarios').appendChild(h('p', { class: 'error', text: 'No se pudo cargar: ' + traducirError(e) }));
     });
@@ -718,6 +785,7 @@
 
   function pintarHonorarios() {
     var cont = $('honorarios'), d = hon.datos;
+    if (!hon.pin) return pintarPin();
     cont.textContent = '';
     if (!d) { cont.appendChild(h('div', { class: 'cargando-txt', text: 'Leyendo la planilla HONORARIOS…' })); return; }
 
@@ -735,7 +803,7 @@
     var btnSae = h('button', { class: 'btn', type: 'button', disabled: d.sae.enCurso }, d.sae.enCurso ? 'Consultando…' : 'Consultar SAE ahora');
     btnSae.addEventListener('click', function () {
       btnSae.disabled = true;
-      api({ a: 'honSae' }).then(function () { aviso('Consultando el SAE: tarda unos minutos'); setTimeout(cargarHonorarios, 30000); })
+      apiPost({ a: 'honSae', pin: hon.pin }).then(function () { aviso('Consultando el SAE: tarda unos minutos'); setTimeout(cargarHonorarios, 30000); })
         .catch(function (e) { btnSae.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
     });
     cont.appendChild(h('div', { class: 'panel' },
@@ -743,7 +811,10 @@
         h('div', null, h('h2', { text: 'Honorarios por cobrar' }), h('div', { class: 'monto-grande', text: importe(p.total) }),
           h('div', { class: 'ayuda chica', text: (p.activos.length + p.dormidos.length) + ' pendientes · ' + p.activos.length + ' con movimiento desde el ' + fechaIso(p.desde) + ' (' + importe(p.totalActivos) + ')' })),
         h('a', { class: 'btn', href: d.planilla.url, target: '_blank', rel: 'noopener' }, 'Abrir HONORARIOS ↗')),
-      h('div', { class: 'fila-panel', style: 'margin-top:8px' }, h('div', { class: 'ayuda chica', text: infoSae }), btnSae)));
+      h('div', { class: 'fila-panel', style: 'margin-top:8px' }, h('div', { class: 'ayuda chica', text: infoSae }), btnSae),
+      h('div', { class: 'botones-hon' },
+        h('button', { class: 'btn', type: 'button', onclick: function () { bloquearHon('Bloqueado.'); } }, '🔒 Bloquear'),
+        h('button', { class: 'btn', type: 'button', onclick: cambiarPin }, 'Cambiar PIN'))));
 
     // Cobrado el mes anterior (reporte mensual)
     var m = d.mes;
@@ -778,11 +849,25 @@
     // Pendientes (la lista que se va depurando con los cobros)
     var dp = h('details', { class: 'grupo', open: true }, h('summary', { text: 'Pendientes con movimiento desde agosto (' + p.activos.length + ')' }),
       h('p', { class: 'ayuda chica', text: 'Se van yendo de la lista a medida que se cargan los cobros (FECHA DE PAGO). Arriba, los que hace más tiempo que no se mueven.' }));
-    p.activos.forEach(function (x) { dp.appendChild(tarjetaHon(x, null)); });
+    // Filtro por el color con que Carlos marca las filas en la planilla (fucsia = trámite reciente)
+    var colores = {};
+    p.activos.concat(p.dormidos).forEach(function (x) { if (x.color) colores[x.color] = (colores[x.color] || 0) + 1; });
+    var listaColores = Object.keys(colores).sort(function (a, b) { return colores[b] - colores[a]; });
+    if (listaColores.length) {
+      var segC = h('div', { class: 'seg' }, h('button', { type: 'button', class: hon.soloColor ? '' : 'activo', onclick: function () { hon.soloColor = ''; pintarHonorarios(); } }, 'Todos'));
+      listaColores.forEach(function (c) {
+        var nom = (p.activos.concat(p.dormidos).filter(function (x) { return x.color === c; })[0] || {}).colorNombre || 'color';
+        segC.appendChild(h('button', { type: 'button', class: hon.soloColor === c ? 'activo' : '', onclick: function () { hon.soloColor = c; pintarHonorarios(); } },
+          h('span', { class: 'punto', style: 'background:' + c }), ' ' + nom + ' (' + colores[c] + ')'));
+      });
+      dp.appendChild(segC);
+    }
+    var filtroC = function (x) { return !hon.soloColor || x.color === hon.soloColor; };
+    p.activos.filter(filtroC).forEach(function (x) { dp.appendChild(tarjetaHon(x, null)); });
     cont.appendChild(dp);
-    var dd = h('details', { class: 'grupo' }, h('summary', { text: 'Sin movimiento desde antes de agosto (' + p.dormidos.length + ')' }),
+    var dd = h('details', { class: 'grupo', open: !!hon.soloColor }, h('summary', { text: 'Sin movimiento desde antes de agosto (' + p.dormidos.filter(filtroC).length + ')' }),
       h('p', { class: 'ayuda chica', text: 'Ordenados por monto, de mayor a menor.' }));
-    p.dormidos.forEach(function (x) { dd.appendChild(tarjetaHon(x, null)); });
+    p.dormidos.filter(filtroC).forEach(function (x) { dd.appendChild(tarjetaHon(x, null)); });
     cont.appendChild(dd);
 
     // Para revisar: cruce HONORARIOS × MAESTRO × SAE
@@ -801,7 +886,7 @@
           enMaestro(x.e) ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio') : null,
           h('button', { class: 'btn', type: 'button', onclick: function () {
             if (!confirm('¿Sacar este aviso de la lista? (' + x.d + ')')) return;
-            apiPost({ a: 'honIgnorar', id: x.id }).then(function () {
+            apiPost({ a: 'honIgnorar', id: x.id, pin: hon.pin }).then(function () {
               hon.datos.cruces = hon.datos.cruces.filter(function (y) { return y.id !== x.id; });
               pintarHonorarios(); aviso('Aviso descartado');
             }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
@@ -817,7 +902,7 @@
     var dias = x.ult ? diasDesdeIso(x.ult.fecha) : null;
     var chip = x.pago ? h('span', { class: 'chip-tipo', text: 'COBRADO ' + fechaIsoCorta(x.pago) })
                       : h('span', { class: 'chip-tipo cancela', text: 'PENDIENTE' });
-    var card = h('div', { class: 'item-rev' },
+    var card = h('div', { class: 'item-rev', style: x.color ? 'border-left:6px solid ' + x.color : null, title: x.colorNombre ? 'Marcado en ' + x.colorNombre + ' en la planilla' : null },
       h('div', { class: 'fila-panel' }, h('b', { text: x.d }), h('span', { class: 'monto', text: importe(x.monto) })),
       h('div', { class: 'meta' }, 'Expte. ' + x.e + (x.n ? ' · ' + x.n : '') + ' ', chip));
     if (movs) {
@@ -1075,6 +1160,7 @@
     estado.vista = 'buscar';
     document.querySelectorAll('.pestana').forEach(function (b) { b.addEventListener('click', function () { cambiarVista(b.dataset.vista); }); });
     $('btn-presentados').addEventListener('click', marcarPresentados);
+    ['pointerdown', 'keydown', 'scroll'].forEach(function (ev) { $('honorarios').addEventListener(ev, usoHon, { passive: true }); });
     if (estado.cfg) api({ a: 'escritos' }).then(function (d) { firmar.datos = d; if (d.porFirmar) contarFirmar(d.porFirmar.length); }).catch(function () {});
     q.addEventListener('input', render);
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });

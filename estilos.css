@@ -319,3 +319,9 @@ details.grupo[open] > summary::before { content: "▾ "; }
 #honorarios .lista-seg li { grid-template-columns: 92px 1fr; font-size: 14px; }
 .botones-hon { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .botones-hon .btn { min-height: 34px; padding: 5px 10px; font-size: 13.5px; }
+.caja-pin { max-width: 380px; margin: 30px auto; text-align: center; display: flex; flex-direction: column; gap: 10px; padding: 22px 18px; }
+.caja-pin .candado { font-size: 34px; }
+.caja-pin .campo-pin { text-align: center; font-size: 22px; letter-spacing: 6px; }
+.caja-pin .pin-msg { min-height: 1.2em; color: var(--e-rojo-tx); margin: 0; }
+.seg .punto { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; border: 1px solid rgba(0,0,0,.2); }
+@media (max-width: 400px) { .pildora { max-width: 34vw; } .barra .icono-btn { width: 38px; } }
