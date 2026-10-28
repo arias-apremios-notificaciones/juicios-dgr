@@ -502,6 +502,14 @@
     }
     contarFirmar(d.porFirmar.length);
 
+    // Errores del motor en los últimos 7 días (para enterarse sin mirar Google)
+    if (d.errores && d.errores.length) {
+      var pe = h('div', { class: 'panel caja-peligro' }, h('b', { text: '⚠ El motor tuvo ' + (d.errores.length === 1 ? 'un error' : d.errores.length + ' errores') + ' en los últimos días' }));
+      d.errores.forEach(function (x) { pe.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit', text: x.fecha + ' · ' + x.origen + ': ' + x.error })); });
+      pe.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Si se repite, avisale a Claude con esta captura. El detalle está en la pestaña ERRORES de la planilla de control.' }));
+      cont.appendChild(pe);
+    }
+
     // Estado del análisis
     var info = d.enCurso ? 'Analizando la cartera…' + (d.quedan ? ' quedan ' + d.quedan + ' juicios' : '')
                          : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite cada 15 días' : 'Todavía no se analizó la cartera');

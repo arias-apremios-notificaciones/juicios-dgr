@@ -19,7 +19,7 @@ var Buscador = (function () {
     return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '');
   }
 
-  // "Casa Otto Hess S.A." -> "casa otto hess sa"
+  // "Ferretería El Sol S.A." -> "ferreteria el sol sa"
   function normalizar(s) {
     return sinAcentos(s).toLowerCase()
       .replace(/[.'`´"]/g, '')
@@ -191,7 +191,7 @@ var Buscador = (function () {
    *   "7108/24", "7108 barra 24", "siete mil ciento ocho barra veinticuatro" -> expediente exacto
    *   "7108" -> ese número en cualquier año
    *   "20-12345678-6", con o sin guiones, o parte (7+ dígitos) -> CUIT
-   *   "otto hess", "padilla pablo" -> deudor (todas las palabras; si no hay, tolera una que falle)
+   *   "el sol", "perez juan" -> deudor (todas las palabras; si no hay, tolera una que falle)
    */
   function buscar(indice, consulta, limite) {
     limite = limite || 60;
