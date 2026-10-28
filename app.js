@@ -449,7 +449,7 @@
     btnAnalizar.addEventListener('click', function () {
       btnAnalizar.disabled = true;
       api({ a: 'analizar' }).then(function () { aviso('Análisis en marcha: tarda unos minutos'); setTimeout(cargarFirmar, 3000); })
-        .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + e.message); });
+        .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
     });
     cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
       h('div', null, h('h2', { text: 'Pedidos de sentencia' }), h('div', { class: 'ayuda chica', text: info })),
@@ -472,7 +472,7 @@
         btnArca.addEventListener('click', function () {
           btnArca.disabled = true;
           api({ a: 'adjuntarArca' }).then(function () { aviso('Uniendo la constancia: tarda unos minutos'); setTimeout(cargarFirmar, 5000); })
-            .catch(function (e) { btnArca.disabled = false; aviso('No se pudo: ' + e.message); });
+            .catch(function (e) { btnArca.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
         });
         panelArca.appendChild(h('div', null, btnArca));
       }
@@ -525,7 +525,7 @@
         apiPost({ a: 'aprobarSentencia', exptes: lista }).then(function (r) {
           aviso('ESTADO actualizado en ' + r.actualizados.length + ' juicio(s)');
           refrescar(true); cargarFirmar();
-        }).catch(function (e) { btn.disabled = false; aviso('No se pudo: ' + e.message); });
+        }).catch(function (e) { btn.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
       });
       refrescarBtn();
       det2.appendChild(h('div', { class: 'botones' }, btn));
@@ -574,7 +574,7 @@
       firmar.sel = {};
       aviso('Anotado en el MAESTRO: ' + r.presentados.length + ' juicio(s)' + (r.noEncontrados.length ? ' · no encontrados: ' + r.noEncontrados.join(', ') : ''));
       refrescar(true); cargarFirmar();
-    }).catch(function (e) { $('btn-presentados').disabled = false; aviso('No se pudo: ' + e.message); });
+    }).catch(function (e) { $('btn-presentados').disabled = false; aviso('No se pudo: ' + traducirError(e)); });
   }
 
   function descartar(x) {
@@ -583,7 +583,7 @@
       delete firmar.sel[x.id];
       aviso('Escrito descartado');
       cargarFirmar();
-    }).catch(function (e) { aviso('No se pudo: ' + e.message); });
+    }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
   }
 
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
@@ -598,6 +598,15 @@
     NO: ['aviso', 'Según el motor todavía no corresponde'],
     SENTENCIA_DICTADA: ['peligro', 'Ojo: el SAE ya tiene sentencia']
   };
+
+  // Los errores técnicos del navegador vienen en inglés: se muestran en castellano.
+  function traducirError(e) {
+    var m = String((e && e.message) || e || '');
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'No hay conexión con el servidor. Revisá la señal e intentá de nuevo.';
+    if (/Cannot read|undefined|is not a function|Unexpected token|JSON/i.test(m)) return 'El servidor respondió algo inesperado. Probablemente falte actualizar la versión en Apps Script (Implementar → Administrar implementaciones → Nueva versión).';
+    if (/Acción desconocida/i.test(m)) return 'El servidor (Apps Script) todavía no tiene esta función: falta pegar el código nuevo y crear una "Nueva versión".';
+    return m;
+  }
 
   function pintarEscritos() {
     var cont = $('escritos');
@@ -641,8 +650,12 @@
     pintarEleccion();
     api({ a: 'previa', e: f.e }).then(function (p) {
       if (manual.fila !== f) return;
-      manual.previa = p; pintarEleccion();
-    }).catch(function (e) { if (manual.fila === f) { manual.error = e.message; pintarEleccion(); } });
+      // Si Apps Script no tiene todavía el modo manual, responde solo con su versión.
+      if (p.ok && !p.motor) {
+        manual.error = 'El servidor (Apps Script) todavía no tiene el modo manual. Falta pegar el código nuevo y crear una "Nueva versión" en Implementar → Administrar implementaciones.';
+      } else manual.previa = p;
+      pintarEleccion();
+    }).catch(function (e) { if (manual.fila === f) { manual.error = traducirError(e); pintarEleccion(); } });
   }
 
   function pintarEleccion() {
@@ -689,7 +702,7 @@
       apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente }).then(function (r) {
         manual.generando = false; manual.resultado = r; pintarEleccion();
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
-      }).catch(function (e) { manual.generando = false; manual.error = e.message; pintarEleccion(); });
+      }).catch(function (e) { manual.generando = false; manual.error = traducirError(e); pintarEleccion(); });
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
   }
