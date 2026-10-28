@@ -658,6 +658,20 @@
     }).catch(function (e) { if (manual.fila === f) { manual.error = traducirError(e); pintarEleccion(); } });
   }
 
+  /** Consulta cada 10 s hasta que el escrito tenga la constancia unida, y cambia el enlace al PDF final. */
+  function esperarArca(r, intento) {
+    if (manual.resultado !== r) return;
+    if (intento > 12) { r.unido = false; r.arca = false; pintarEleccion(); return; }
+    setTimeout(function () {
+      api({ a: 'escritos' }).then(function (d) {
+        var x = (d.porFirmar || []).filter(function (y) { return y.e === r.escrito.e && y.arca; })
+                                   .sort(function (a, b) { return a.generado < b.generado ? 1 : -1; })[0];
+        if (x && manual.resultado === r) { r.unido = true; r.escrito.url = x.url; pintarEleccion(); }
+        else esperarArca(r, intento + 1);
+      }).catch(function () { esperarArca(r, intento + 1); });
+    }, 10000);
+  }
+
   function pintarEleccion() {
     var caja = $('man-eleccion');
     if (!caja) return;
@@ -671,11 +685,15 @@
 
     if (manual.resultado) {
       var r = manual.resultado;
+      // Mientras se une la constancia de ARCA (≈20–60 s), el PDF todavía no es el definitivo: no se ofrece abrirlo.
+      var esperando = r.arca && !r.unido;
       caja.appendChild(h('div', { class: 'panel caja-ok' },
         h('b', { text: '✓ Escrito generado' }),
-        h('div', { text: r.arca ? 'En un minuto se le une la constancia de ARCA. Lo encontrás en Para firmar.' : 'Falta la constancia de ARCA del mes: guardala en su carpeta y se une sola.' }),
+        esperando ? h('div', { class: 'cargando-txt', text: 'Uniendo la constancia de ARCA… (menos de un minuto)' })
+                  : h('div', { text: r.unido ? 'Listo: un solo PDF con el escrito y la constancia de ARCA. También está en Para firmar.'
+                                             : 'Falta la constancia de ARCA del mes: guardala en su carpeta y se une sola.' }),
         h('div', { class: 'botones', style: 'margin-top:8px' },
-          h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+          esperando ? null : h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
           h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'),
           h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; pintarEscritos(); } }, 'Otro escrito'))));
       return;
@@ -702,6 +720,7 @@
       apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente }).then(function (r) {
         manual.generando = false; manual.resultado = r; pintarEleccion();
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
+        if (r.arca) esperarArca(r, 0);
       }).catch(function (e) { manual.generando = false; manual.error = traducirError(e); pintarEleccion(); });
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
