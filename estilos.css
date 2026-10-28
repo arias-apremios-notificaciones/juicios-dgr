@@ -289,7 +289,8 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .caja-ok a.btn, .caja-ok .btn { color: var(--texto); }
 .caja-ok .btn.primario { color: #fff; }
 .pestana { white-space: nowrap; font-size: 14.5px; padding: 9px 6px; }
-@media (max-width: 360px) { .pestana { font-size: 13.5px; } }
+@media (max-width: 430px) { .pestanas { gap: 4px; padding: 0 10px 2px; } .pestana { font-size: 13.5px; padding: 9px 4px; flex: 1 1 auto; } }
+@media (max-width: 360px) { .pestana { font-size: 12.5px; } }
 .chip-tipo.cancela { background: var(--e-amarillo-bg); color: var(--e-amarillo-tx); }
 
 /* Estados nuevos del MAESTRO (28/10/2026) */
@@ -302,3 +303,19 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .marca span { white-space: nowrap; }
 .pildora { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
 @media (max-width: 400px) { .marca { font-size: 16px; } .pildora { font-size: 12px; padding: 5px 9px; } }
+
+/* ───────── Honorarios (28/10/2026) ───────── */
+#honorarios { max-width: 760px; margin: 0 auto; padding: 14px 16px 60px; }
+.monto-grande { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; margin: 2px 0; }
+.linea-cobro { display: grid; grid-template-columns: 46px 1fr auto; gap: 8px; font-size: 14px; padding: 5px 0; border-bottom: 1px solid rgba(0,0,0,.08); font-variant-numeric: tabular-nums; }
+.linea-cobro span:nth-child(2) { min-width: 0; overflow-wrap: anywhere; }
+.seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
+.seg button { border: 1px solid var(--borde); background: var(--superficie); color: var(--texto); border-radius: 999px; padding: 7px 12px; font-size: 13.5px; cursor: pointer; }
+.seg button.activo { background: var(--azul); border-color: var(--azul); color: #fff; }
+#honorarios .item-rev { cursor: default; }
+#honorarios .item-rev .fila-panel { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+#honorarios .item-rev .monto { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#honorarios .item-rev .motivo.tranquilo { color: var(--texto-2); }
+#honorarios .lista-seg li { grid-template-columns: 92px 1fr; font-size: 14px; }
+.botones-hon { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.botones-hon .btn { min-height: 34px; padding: 5px 10px; font-size: 13.5px; }

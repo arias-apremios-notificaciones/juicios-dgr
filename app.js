@@ -450,9 +450,11 @@
     contenido.hidden = v !== 'buscar';
     $('firmar').hidden = v !== 'firmar';
     $('escritos').hidden = v !== 'escritos';
+    $('honorarios').hidden = v !== 'honorarios';
     actualizarBarraAcciones();
     if (v === 'firmar') cargarFirmar();
     else if (v === 'escritos') pintarEscritos();
+    else if (v === 'honorarios') cargarHonorarios();
     else render();
     window.scrollTo(0, 0);
   }
@@ -669,6 +671,165 @@
       aviso('Escrito descartado');
       cargarFirmar();
     }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
+  }
+
+  // ───────── Honorarios: tablero de cobro (la planilla HONORARIOS es el archivo principal; la app solo la lee) ─────────
+  var hon = { datos: null, cargando: false, periodo: 'semana' };
+  var TIPOS_CRUCE = {
+    COBRO_SIN_FECHA: 'Dice que se cobró, pero falta la FECHA DE PAGO',
+    COBRADO_MAESTRO: 'Ya cobrados: falta cambiar el ESTADO en el MAESTRO',
+    SAE_NUEVO: 'Movimientos del SAE que no están en HONORARIOS',
+    MAESTRO_NUEVO: 'Movimientos del MAESTRO que no están en HONORARIOS',
+    FALTA_EN_HONORARIOS: 'En HONORARIOS PENDIENTES (MAESTRO) pero no en la planilla HONORARIOS',
+    POSIBLE_FALTA: 'Con sentencia y deuda cancelada: ¿falta cargarlos en HONORARIOS?'
+  };
+
+  function fechaIso(i) { return i ? i.slice(8, 10) + '/' + i.slice(5, 7) + '/' + i.slice(0, 4) : ''; }
+  function fechaIsoCorta(i) { return i ? i.slice(8, 10) + '/' + i.slice(5, 7) : ''; }
+  function diasDesdeIso(i) { return i ? Math.round((Date.now() - Date.parse(i + 'T12:00:00')) / 86400000) : null; }
+
+  /** Enlace a la planilla HONORARIOS posicionado en la fila. */
+  function urlFilaHon(r) {
+    var p = hon.datos && hon.datos.planilla;
+    return p && p.url ? p.url.replace(/[?#].*$/, '') + '#gid=' + p.gid + '&range=A' + r : '';
+  }
+
+  function cargarHonorarios() {
+    if (!estado.cfg || hon.cargando) return;
+    hon.cargando = true;
+    if (!hon.datos) pintarHonorarios();
+    api({ a: 'honorarios' }).then(function (d) {
+      hon.datos = d; hon.cargando = false;
+      pintarHonorarios();
+      if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios') cargarHonorarios(); }, 30000);
+    }).catch(function (e) {
+      hon.cargando = false;
+      $('honorarios').textContent = '';
+      $('honorarios').appendChild(h('p', { class: 'error', text: 'No se pudo cargar: ' + traducirError(e) }));
+    });
+  }
+
+  function linkHon(r, texto) {
+    var u = urlFilaHon(r);
+    return u ? h('a', { class: 'btn', href: u, target: '_blank', rel: 'noopener', onclick: function (ev) { ev.stopPropagation(); } }, texto || 'Abrir en HONORARIOS ↗') : null;
+  }
+
+  function enMaestro(e) { return estado.filas.some(function (f) { return Buscador.exptesDe(f.e)[0] && Buscador.exptesDe(f.e)[0] === Buscador.exptesDe(e)[0]; }); }
+
+  function pintarHonorarios() {
+    var cont = $('honorarios'), d = hon.datos;
+    cont.textContent = '';
+    if (!d) { cont.appendChild(h('div', { class: 'cargando-txt', text: 'Leyendo la planilla HONORARIOS…' })); return; }
+
+    if (d.errores && d.errores.length) {
+      var pe = h('div', { class: 'panel caja-peligro' }, h('b', { text: '⚠ Hubo un error en el tablero de honorarios' }));
+      d.errores.forEach(function (x) { pe.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit', text: x.fecha + ' · ' + x.origen + ': ' + x.error })); });
+      cont.appendChild(pe);
+    }
+
+    // Resumen + SAE
+    var p = d.pendientes;
+    var infoSae = d.sae.enCurso ? 'Consultando el SAE…' + (d.sae.quedan ? ' quedan ' + d.sae.quedan : '')
+                : d.sae.ultima ? 'SAE consultado el ' + new Date(d.sae.ultima).toLocaleDateString('es-AR') + ' · se repite cada 7 días'
+                : 'Todavía no se consultó el SAE';
+    var btnSae = h('button', { class: 'btn', type: 'button', disabled: d.sae.enCurso }, d.sae.enCurso ? 'Consultando…' : 'Consultar SAE ahora');
+    btnSae.addEventListener('click', function () {
+      btnSae.disabled = true;
+      api({ a: 'honSae' }).then(function () { aviso('Consultando el SAE: tarda unos minutos'); setTimeout(cargarHonorarios, 30000); })
+        .catch(function (e) { btnSae.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    cont.appendChild(h('div', { class: 'panel' },
+      h('div', { class: 'fila-panel' },
+        h('div', null, h('h2', { text: 'Honorarios por cobrar' }), h('div', { class: 'monto-grande', text: importe(p.total) }),
+          h('div', { class: 'ayuda chica', text: (p.activos.length + p.dormidos.length) + ' pendientes · ' + p.activos.length + ' con movimiento desde el ' + fechaIso(p.desde) + ' (' + importe(p.totalActivos) + ')' })),
+        h('a', { class: 'btn', href: d.planilla.url, target: '_blank', rel: 'noopener' }, 'Abrir HONORARIOS ↗')),
+      h('div', { class: 'fila-panel', style: 'margin-top:8px' }, h('div', { class: 'ayuda chica', text: infoSae }), btnSae)));
+
+    // Cobrado el mes anterior (reporte mensual)
+    var m = d.mes;
+    var pm = h('div', { class: 'panel caja-ok' },
+      h('div', { class: 'fila-panel' }, h('h2', { text: 'Cobrado en ' + m.nombre.toLowerCase() + ' ' + m.anio }), h('b', { class: 'monto-grande', text: importe(m.total) })),
+      h('div', { class: 'ayuda chica', style: 'color:inherit', text: m.registrados.length ? m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros') + ' con FECHA DE PAGO en la planilla' : 'No hay cobros con FECHA DE PAGO en ese mes' }));
+    m.registrados.forEach(function (x) {
+      pm.appendChild(h('div', { class: 'linea-cobro' }, h('span', { text: fechaIsoCorta(x.pago) }), h('span', { text: x.d + ' · ' + x.e }), h('b', { text: importe(x.monto) })));
+    });
+    pm.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit;margin-top:8px' },
+      m.pdf ? h('a', { href: m.pdf.url, target: '_blank', rel: 'noopener', text: 'Reporte en PDF ↗' }) : 'El reporte en PDF se genera solo el primer día hábil del mes (carpeta HONORARIOS/REPORTES MENSUALES).'));
+    cont.appendChild(pm);
+    if (m.enTexto.length) {
+      var pt = h('div', { class: 'panel caja-aviso' }, h('b', { text: 'Para verificar: el seguimiento menciona ' + (m.enTexto.length === 1 ? 'un cobro' : m.enTexto.length + ' cobros') + ' de ' + m.nombre.toLowerCase() + ' sin FECHA DE PAGO en ese mes' }));
+      m.enTexto.forEach(function (x) { pt.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit' }, fechaIsoCorta(x.fecha) + ' · ' + x.d + ' (' + x.e + '): ' + x.texto + ' ', linkHon(x.r, 'Abrir fila ↗'))); });
+      cont.appendChild(pt);
+    }
+
+    // Tramitados: semana pasada o primer reporte (agosto–octubre)
+    var per = hon.periodo === 'primer' ? d.primer : d.semana;
+    var seg = h('div', { class: 'seg' },
+      h('button', { type: 'button', class: hon.periodo === 'semana' ? 'activo' : '', onclick: function () { hon.periodo = 'semana'; pintarHonorarios(); } },
+        'Semana pasada (' + fechaIsoCorta(d.semana.desde) + ' – ' + fechaIsoCorta(d.semana.hasta) + ')'),
+      h('button', { type: 'button', class: hon.periodo === 'primer' ? 'activo' : '', onclick: function () { hon.periodo = 'primer'; pintarHonorarios(); } },
+        'Agosto – octubre'));
+    var yaCobrados = per.lista.filter(function (x) { return x.pago; }).length;
+    cont.appendChild(h('div', { class: 'anio' }, 'Honorarios tramitados', h('small', { text: per.lista.length + ' juicios' + (yaCobrados ? ' · ' + yaCobrados + ' ya cobrados' : '') })));
+    cont.appendChild(seg);
+    if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay movimientos cargados en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
+    per.lista.forEach(function (x) { cont.appendChild(tarjetaHon(x, x.movs)); });
+
+    // Pendientes (la lista que se va depurando con los cobros)
+    var dp = h('details', { class: 'grupo', open: true }, h('summary', { text: 'Pendientes con movimiento desde agosto (' + p.activos.length + ')' }),
+      h('p', { class: 'ayuda chica', text: 'Se van yendo de la lista a medida que se cargan los cobros (FECHA DE PAGO). Arriba, los que hace más tiempo que no se mueven.' }));
+    p.activos.forEach(function (x) { dp.appendChild(tarjetaHon(x, null)); });
+    cont.appendChild(dp);
+    var dd = h('details', { class: 'grupo' }, h('summary', { text: 'Sin movimiento desde antes de agosto (' + p.dormidos.length + ')' }),
+      h('p', { class: 'ayuda chica', text: 'Ordenados por monto, de mayor a menor.' }));
+    p.dormidos.forEach(function (x) { dd.appendChild(tarjetaHon(x, null)); });
+    cont.appendChild(dd);
+
+    // Para revisar: cruce HONORARIOS × MAESTRO × SAE
+    var dr = h('details', { class: 'grupo', open: d.cruces.length > 0 }, h('summary', { text: 'Para revisar (' + d.cruces.length + ')' }),
+      h('p', { class: 'ayuda chica', text: 'Diferencias entre HONORARIOS, el MAESTRO y el SAE. Corregí la planilla y el aviso desaparece solo; si no corresponde, tocá "No corresponde".' }));
+    var grupos = {};
+    d.cruces.forEach(function (x) { (grupos[x.tipo] = grupos[x.tipo] || []).push(x); });
+    Object.keys(TIPOS_CRUCE).forEach(function (t) {
+      if (!grupos[t]) return;
+      dr.appendChild(h('div', { class: 'anio' }, TIPOS_CRUCE[t], h('small', { text: String(grupos[t].length) })));
+      grupos[t].forEach(function (x) {
+        var item = h('div', { class: 'item-rev' }, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e }),
+          h('div', { class: 'motivo', text: x.texto }));
+        var botones = h('div', { class: 'botones-hon' },
+          x.r ? linkHon(x.r) : null,
+          enMaestro(x.e) ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio') : null,
+          h('button', { class: 'btn', type: 'button', onclick: function () {
+            if (!confirm('¿Sacar este aviso de la lista? (' + x.d + ')')) return;
+            apiPost({ a: 'honIgnorar', id: x.id }).then(function () {
+              hon.datos.cruces = hon.datos.cruces.filter(function (y) { return y.id !== x.id; });
+              pintarHonorarios(); aviso('Aviso descartado');
+            }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
+          } }, 'No corresponde'));
+        item.appendChild(botones);
+        dr.appendChild(item);
+      });
+    });
+    cont.appendChild(dr);
+  }
+
+  function tarjetaHon(x, movs) {
+    var dias = x.ult ? diasDesdeIso(x.ult.fecha) : null;
+    var chip = x.pago ? h('span', { class: 'chip-tipo', text: 'COBRADO ' + fechaIsoCorta(x.pago) })
+                      : h('span', { class: 'chip-tipo cancela', text: 'PENDIENTE' });
+    var card = h('div', { class: 'item-rev' },
+      h('div', { class: 'fila-panel' }, h('b', { text: x.d }), h('span', { class: 'monto', text: importe(x.monto) })),
+      h('div', { class: 'meta' }, 'Expte. ' + x.e + (x.n ? ' · ' + x.n : '') + ' ', chip));
+    if (movs) {
+      var ul = h('ul', { class: 'lista-seg' });
+      movs.slice().reverse().forEach(function (l) { ul.appendChild(h('li', null, h('span', { class: 'f', text: fechaIso(l.fecha) }), h('span', { text: l.texto }))); });
+      card.appendChild(ul);
+    } else if (x.ult) {
+      card.appendChild(h('div', { class: 'motivo' + (dias > 30 ? '' : ' tranquilo'), text: 'Último: ' + fechaIso(x.ult.fecha) + ' (' + diasTexto(dias) + ') · ' + x.ult.texto }));
+    } else card.appendChild(h('div', { class: 'motivo', text: 'Sin movimientos con fecha en TRAMITE PENDIENTE' }));
+    if (x.contacto) card.appendChild(h('div', { class: 'meta', text: 'Contacto: ' + x.contacto }));
+    card.appendChild(h('div', { class: 'botones-hon' }, linkHon(x.r)));
+    return card;
   }
 
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
