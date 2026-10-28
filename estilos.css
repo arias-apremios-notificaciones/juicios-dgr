@@ -290,3 +290,4 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .caja-ok .btn.primario { color: #fff; }
 .pestana { white-space: nowrap; font-size: 14.5px; padding: 9px 6px; }
 @media (max-width: 360px) { .pestana { font-size: 13.5px; } }
+.chip-tipo.cancela { background: var(--e-amarillo-bg); color: var(--e-amarillo-tx); }

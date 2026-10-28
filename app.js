@@ -411,7 +411,7 @@
       Object.keys(firmar.sel).forEach(function (id) { if (!d.porFirmar.some(function (x) { return x.id === id; })) delete firmar.sel[id]; });
       firmar.cargando = false;
       pintarFirmar();
-      if (d.enCurso || d.uniendoArca) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
+      if (d.enCurso || d.uniendoArca || d.revisandoIvp) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
     }).catch(function (e) {
       firmar.cargando = false;
       $('firmar').textContent = '';
@@ -452,9 +452,22 @@
         .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
     });
     cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
-      h('div', null, h('h2', { text: 'Pedidos de sentencia' }), h('div', { class: 'ayuda chica', text: info })),
+      h('div', null, h('h2', { text: 'Pedidos de sentencia (cada 15 días)' }), h('div', { class: 'ayuda chica', text: info })),
       btnAnalizar),
       h('div', { class: 'ayuda chica' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }))));
+
+    // IVP de Gmail → comunicaciones de cancelación
+    var infoIvp = d.revisandoIvp ? 'Revisando los IVP de Gmail…'
+                 : (d.ultimoIvp ? 'Última revisión: ' + new Date(d.ultimoIvp).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · todos los días'
+                                : 'Todavía no se revisaron los IVP');
+    var btnIvp = h('button', { class: 'btn', type: 'button', disabled: d.revisandoIvp }, d.revisandoIvp ? 'Revisando…' : 'Revisar IVP ahora');
+    btnIvp.addEventListener('click', function () {
+      btnIvp.disabled = true;
+      api({ a: 'revisarIvp' }).then(function () { aviso('Revisando los IVP: tarda unos minutos'); setTimeout(cargarFirmar, 5000); })
+        .catch(function (e) { btnIvp.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
+      h('div', null, h('h2', { text: 'Cancelaciones (IVP)' }), h('div', { class: 'ayuda chica', text: infoIvp })), btnIvp)));
 
     // Constancia de ARCA del mes
     if (d.arca && !d.arca.alDia) {
@@ -541,8 +554,10 @@
       h('div', { class: 'deudor', text: x.d }),
       h('div', { class: 'meta' },
         h('span', { class: 'expte', text: 'Expte. ' + x.e }),
-        h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : ''), text: /REITERO/.test(x.tipo) ? 'REITERO' : 'PIDO SENTENCIA' }),
-        h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: x.arca ? '📎 con ARCA' : 'sin ARCA' }),
+        h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : /^COMUNICO/.test(x.tipo) ? ' cancela' : ''),
+                    text: /REITERO/.test(x.tipo) ? 'REITERO' : /^COMUNICO/.test(x.tipo) ? x.tipo.replace(/ DE LA DEUDA/, '') : 'PIDO SENTENCIA' }),
+        h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: x.arca ? (x.adjunto ? '📎 con IVP' : '📎 con ARCA') : (x.adjunto ? 'uniendo IVP…' : 'sin ARCA') }),
+        x.nuevoEstado ? h('span', { class: 'ayuda chica', text: 'Al presentar: ESTADO → ' + x.nuevoEstado }) : null,
         h('span', { text: x.motivo })),
       x.aviso ? h('div', { class: 'alerta', text: '⚠ ' + x.aviso }) : null,
       h('div', { class: 'botones' },
@@ -566,8 +581,10 @@
   function marcarPresentados() {
     var ids = Object.keys(firmar.sel);
     if (!ids.length) return;
+    var conEstado = (firmar.datos && firmar.datos.porFirmar || []).filter(function (x) { return firmar.sel[x.id] && x.nuevoEstado; }).length;
     if (!confirm('¿Ya firmaste y subiste al SAE ' + (ids.length === 1 ? 'este escrito' : 'estos ' + ids.length + ' escritos') +
-                 '?\n\nSe va a anotar "PIDO SENTENCIA" con la fecha de hoy en el seguimiento del MAESTRO.')) return;
+                 '?\n\nSe va a anotar en el seguimiento del MAESTRO, con la fecha de hoy, lo que corresponde a cada uno (PIDO SENTENCIA, COMUNICO CANCELACIÓN…).' +
+                 (conEstado ? '\nEn ' + conEstado + ' también se actualiza el ESTADO (CANCELADO TOTAL / PARCIAL).' : ''))) return;
     $('btn-presentados').disabled = true;
     apiPost({ a: 'presentado', ids: ids }).then(function (r) {
       $('btn-presentados').disabled = false;
