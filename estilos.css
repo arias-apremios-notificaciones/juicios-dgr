@@ -298,3 +298,7 @@ details.grupo[open] > summary::before { content: "▾ "; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .estado.celeste { background: #12384a; color: #9ed6ee; } :root:not([data-theme="light"]) .estado.violeta { background: #2e2447; color: #cdbdf3; } }
 .cambiar-estado { margin: 4px 0 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
 .cambiar-estado .campo-form { margin-top: 4px; }
+.barra a.icono-btn { color: #fff; }
+.marca span { white-space: nowrap; }
+.pildora { min-width: 0; overflow: hidden; text-overflow: ellipsis; max-width: 46vw; }
+@media (max-width: 400px) { .marca { font-size: 16px; } .pildora { font-size: 12px; padding: 5px 9px; } }

@@ -101,6 +101,16 @@
     estado.filas = datos.filas || [];
     estado.indice = Buscador.indexar(estado.filas);
     estado.generado = datos.generado;
+    estado.maestro = datos.maestro || null;
+    var b = $('btn-maestro');
+    if (estado.maestro && estado.maestro.url) { b.href = estado.maestro.url; b.hidden = false; }
+  }
+
+  /** Enlace al MAESTRO posicionado en la fila del juicio (para editarlo directo). */
+  function urlFilaMaestro(f) {
+    var m = estado.maestro;
+    if (!m || !m.url) return '';
+    return m.url.replace(/[?#].*$/, '') + '#gid=' + m.gid + '&range=A' + f.r;
   }
 
   function sync(texto, clase) {
@@ -220,6 +230,8 @@
       dato('Último mov.', ultimoMovIso(f) ? ultimoMovIso(f).split('-').reverse().join('/') : '—'),
       dato('Fila MAESTRO', String(f.r))));
     det.appendChild(cajaEstado(f));
+    if (urlFilaMaestro(f)) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:2px 0 4px' },
+      h('a', { href: urlFilaMaestro(f), target: '_blank', rel: 'noopener', text: 'Abrir en el MAESTRO (fila ' + f.r + ') ↗' })));
 
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
