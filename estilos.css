@@ -291,3 +291,8 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .pestana { white-space: nowrap; font-size: 14.5px; padding: 9px 6px; }
 @media (max-width: 360px) { .pestana { font-size: 13.5px; } }
 .chip-tipo.cancela { background: var(--e-amarillo-bg); color: var(--e-amarillo-tx); }
+
+/* Estados nuevos del MAESTRO (28/10/2026) */
+.estado.celeste { background: #d6ebf5; color: #0f5873; }
+.estado.violeta { background: #e6e0f3; color: #4b2f86; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .estado.celeste { background: #12384a; color: #9ed6ee; } :root:not([data-theme="light"]) .estado.violeta { background: #2e2447; color: #cdbdf3; } }

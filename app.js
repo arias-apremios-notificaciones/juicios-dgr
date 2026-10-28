@@ -52,7 +52,9 @@
     'DEMANDA': '', 'INTIMACION': 'verde', 'CON EXCEPCIONES': 'verde', 'ABIERTO A PRUEBA': 'verde',
     'AUTOS P/RESOLVER': 'verde', 'PLANILLA FISCAL': 'verde', 'RECURSO': 'verde',
     'SENTENCIA': 'naranja', 'EJECUCION': 'naranja', 'HONORARIOS PENDIENTES': 'rojo',
-    'CANCELADO PARCIAL': 'azul', 'CANCELADO TOTAL': 'amarillo'
+    'CANCELADO PARCIAL': 'azul', 'CANCELADO TOTAL': 'amarillo',
+    'DEUDA REGULARIZADA': 'celeste', 'PLAN DE PAGOS ACTIVO': 'celeste', 'PLAN DE PAGOS CADUCO': 'rojo',
+    'EDICTOS': 'verde', 'SIN BIENES / INHIBICIÓN': 'violeta'
   };
   var pesos = new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', minimumFractionDigits: 2 });
 
@@ -604,7 +606,8 @@
   }
 
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
-  var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' }];
+  var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' },
+                       { id: 'COMUNICO_IVP', nombre: 'Comunicación de cancelación (IVP)' }];
   var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false };
 
   var LECTURA_MOTOR = {
@@ -613,7 +616,9 @@
     ESPERAR: ['aviso', 'El motor esperaría'],
     REVISION: ['aviso', 'El motor lo mandaría a revisión manual'],
     NO: ['aviso', 'Según el motor todavía no corresponde'],
-    SENTENCIA_DICTADA: ['peligro', 'Ojo: el SAE ya tiene sentencia']
+    SENTENCIA_DICTADA: ['peligro', 'Ojo: el SAE ya tiene sentencia'],
+    COMUNICAR: ['ok', 'Se puede comunicar'],
+    YA_COMUNICADO: ['peligro', 'Ojo: ya figura comunicado en el SAE']
   };
 
   // Los errores técnicos del navegador vienen en inglés: se muestran en castellano.
@@ -632,7 +637,10 @@
 
     var sel = h('select', { id: 'man-tipo', class: 'campo-form' });
     TIPOS_ESCRITO.forEach(function (t) { var o = h('option', { value: t.id, text: t.nombre }); if (t.id === manual.tipo) o.selected = true; sel.appendChild(o); });
-    sel.addEventListener('change', function () { manual.tipo = sel.value; });
+    sel.addEventListener('change', function () {
+      manual.tipo = sel.value;
+      if (manual.fila) elegirJuicio(manual.fila);   // vuelve a consultar con el tipo nuevo
+    });
     var inp = h('input', { id: 'man-expte', class: 'campo-form', type: 'search', inputmode: 'search', autocomplete: 'off', autocorrect: 'off',
                            spellcheck: 'false', placeholder: 'Ej. 10420/26 o parte del nombre', value: manual.texto });
     var lista = h('div', { class: 'man-lista' });
@@ -665,7 +673,7 @@
     var inp = $('man-expte'); if (inp) inp.value = f.e;
     var lista = document.querySelector('.man-lista'); if (lista) lista.textContent = '';
     pintarEleccion();
-    api({ a: 'previa', e: f.e }).then(function (p) {
+    api({ a: 'previa', e: f.e, t: manual.tipo }).then(function (p) {
       if (manual.fila !== f) return;
       // Si Apps Script no tiene todavía el modo manual, responde solo con su versión.
       if (p.ok && !p.motor) {
@@ -716,7 +724,7 @@
       return;
     }
     if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
-    if (!manual.previa) { caja.appendChild(h('div', { class: 'cargando-txt', text: 'Consultando el SAE…' })); return; }
+    if (!manual.previa) { caja.appendChild(h('div', { class: 'cargando-txt', text: manual.tipo === 'COMUNICO_IVP' ? 'Buscando el IVP en Gmail y consultando el SAE…' : 'Consultando el SAE…' })); return; }
 
     var p = manual.previa;
     if (!p.ok) { caja.appendChild(h('p', { class: 'error', text: p.error })); return; }
@@ -726,11 +734,18 @@
       h('b', { text: lect[1] }),
       h('div', { text: p.motor.motivo + (p.motor.detalle ? ' — ' + p.motor.detalle : '') }),
       p.motor.verificar ? h('div', { class: 'ayuda chica', text: 'Verificá que la intimación haya sido positiva.' }) : null));
+    if (p.ivp) {
+      caja.appendChild(h('div', { class: 'panel' },
+        h('b', { text: 'IVP I ' + p.ivp.nro + ' del ' + p.ivp.fecha }), h('span', { class: 'ayuda chica', text: ' · recibido el ' + p.ivp.recibido }),
+        p.ivp.escrito ? h('div', { text: 'Escrito: ' + p.ivp.escrito + (p.ivp.estado ? ' · al presentar, ESTADO → ' + p.ivp.estado : '') }) : null,
+        p.ivp.url ? h('div', null, h('a', { href: p.ivp.url, target: '_blank', rel: 'noopener', text: 'Ver el IVP ↗' })) : null));
+    }
     if (p.pendiente) caja.appendChild(h('div', { class: 'alerta', text: 'Ya hay un escrito de este expediente esperando firma (pestaña Para firmar).' }));
 
     var btn = h('button', { class: 'btn primario', type: 'button', disabled: manual.generando }, manual.generando ? 'Generando…' : 'Generar escrito');
     btn.addEventListener('click', function () {
-      var riesgo = p.motor.decision === 'SENTENCIA_DICTADA' || p.motor.decision === 'NO';
+      if (manual.tipo === 'COMUNICO_IVP' && p.motor.decision === 'REVISION') { aviso('Este IVP no se puede comunicar automáticamente: ' + p.motor.motivo); return; }
+      var riesgo = p.motor.decision === 'SENTENCIA_DICTADA' || p.motor.decision === 'NO' || p.motor.decision === 'YA_COMUNICADO';
       if ((riesgo || p.pendiente) && !confirm((p.pendiente ? 'Ya hay un escrito para firmar de este expediente. ' : '') +
           (riesgo ? 'El motor no lo recomienda (' + p.motor.motivo + '). ' : '') + '¿Generar igual?')) return;
       manual.generando = true; pintarEleccion();
