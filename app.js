@@ -127,10 +127,11 @@
   }
 
   // ───────── Render ─────────
+  // setTimeout (y no requestAnimationFrame): rAF se pausa con la ventana en segundo plano.
   var renderPendiente;
   function render() {
-    cancelAnimationFrame(renderPendiente);
-    renderPendiente = requestAnimationFrame(pintar);
+    clearTimeout(renderPendiente);
+    renderPendiente = setTimeout(pintar, 0);
   }
 
   function pintar() {
@@ -218,6 +219,8 @@
       dato('CUIT', cuit(f.c)),
       dato('Último mov.', ultimoMovIso(f) ? ultimoMovIso(f).split('-').reverse().join('/') : '—'),
       dato('Fila MAESTRO', String(f.r))));
+    det.appendChild(cajaEstado(f));
+
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
     lineas.forEach(function (l) {
@@ -237,6 +240,49 @@
                  onclick: function () { copiar(f.e); } }, 'Portal SAE ↗')),
       f.s === 'DUDOSO' ? h('div', { class: 'alerta', text: 'Ojo: la carátula del SAE no coincide del todo con el deudor. Verificala.' }) : null,
       saeCaja));
+  }
+
+  // Estados del MAESTRO (los 12 originales + los agregados el 28/10/2026). "OTROS" lleva subestado libre.
+  var ESTADOS = ['DEMANDA', 'INTIMACION', 'CON EXCEPCIONES', 'ABIERTO A PRUEBA', 'AUTOS P/RESOLVER', 'PLANILLA FISCAL', 'EDICTOS',
+                 'SENTENCIA', 'EJECUCION', 'SIN BIENES / INHIBICIÓN', 'HONORARIOS PENDIENTES', 'DEUDA REGULARIZADA',
+                 'PLAN DE PAGOS ACTIVO', 'PLAN DE PAGOS CADUCO', 'CANCELADO PARCIAL', 'CANCELADO TOTAL', 'RECURSO', 'OTROS'];
+
+  /** "Estado: X  [Cambiar estado]" → lista + subestado libre para OTROS → escribe en el MAESTRO con confirmación. */
+  function cajaEstado(f) {
+    var caja = h('div', { class: 'cambiar-estado' });
+    var pintar = function (editando) {
+      caja.textContent = '';
+      if (!editando) {
+        caja.appendChild(h('span', { class: 'ayuda chica', text: 'Estado en el MAESTRO: ' }));
+        caja.appendChild(h('b', { text: f.g || 'SIN ESTADO' }));
+        caja.appendChild(h('button', { class: 'leer', type: 'button', onclick: function () { pintar(true); } }, 'Cambiar estado'));
+        return;
+      }
+      var actual = /^OTROS/i.test(f.g || '') ? 'OTROS' : f.g;
+      var sel = h('select', { class: 'campo-form' });
+      ESTADOS.forEach(function (e) { var o = h('option', { value: e, text: e }); if (e === actual) o.selected = true; sel.appendChild(o); });
+      var sub = h('input', { class: 'campo-form', type: 'text', placeholder: 'Subestado (ej. ESPERANDO INFORME DEL BANCO)',
+                             value: /^OTROS:/i.test(f.g || '') ? f.g.replace(/^OTROS:\s*/i, '') : '' });
+      var verSub = function () { sub.hidden = sel.value !== 'OTROS'; };
+      sel.addEventListener('change', verSub);
+      var guardar = h('button', { class: 'btn primario', type: 'button' }, 'Guardar');
+      guardar.addEventListener('click', function () {
+        var nuevo = sel.value === 'OTROS' ? 'OTROS: ' + sub.value.trim().toUpperCase() : sel.value;
+        if (sel.value === 'OTROS' && !sub.value.trim()) { aviso('Escribí el subestado'); return; }
+        if (!confirm('¿Cambiar el ESTADO de ' + f.d + ' (' + f.e + ') en el MAESTRO?\n\n' + (f.g || 'SIN ESTADO') + '  →  ' + nuevo)) return;
+        guardar.disabled = true;
+        apiPost({ a: 'cambiarEstado', e: f.e, estado: sel.value, sub: sub.value }).then(function (r) {
+          f.g = r.estado; aviso('ESTADO actualizado: ' + r.estado); pintar(false); refrescar(true);
+        }).catch(function (e) { guardar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+      });
+      caja.appendChild(h('div', { class: 'ayuda chica', text: 'Nuevo estado:' }));
+      caja.appendChild(sel); caja.appendChild(sub);
+      caja.appendChild(h('div', { class: 'botones', style: 'margin-top:8px' }, guardar,
+        h('button', { class: 'btn', type: 'button', onclick: function () { pintar(false); } }, 'Cancelar')));
+      verSub();
+    };
+    pintar(false);
+    return caja;
   }
 
   function dato(t, v) { return h('div', null, h('dt', { text: t }), h('dd', { text: v })); }
