@@ -737,6 +737,7 @@
       .catch(function (e) { aviso(traducirError(e)); });
   }
   var TIPOS_CRUCE = {
+    DUPLICADO: 'Posibles filas repetidas (inflan el total por cobrar)',
     COBRO_SIN_FECHA: 'Dice que se cobró, pero falta la FECHA DE PAGO',
     COBRADO_MAESTRO: 'Ya cobrados: falta cambiar el ESTADO en el MAESTRO',
     SAE_NUEVO: 'Movimientos del SAE que no están en HONORARIOS',
