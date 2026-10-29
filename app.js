@@ -104,8 +104,7 @@
     estado.maestro = datos.maestro || null;
     var b = $('btn-maestro');
     if (estado.maestro && estado.maestro.url) { b.href = estado.maestro.url; b.hidden = false; }
-    var bh = $('btn-honorarios');
-    if (datos.honorarios && datos.honorarios.url) { bh.href = datos.honorarios.url; bh.hidden = false; }
+    actualizarBtnHon();
   }
 
   /** Enlace al MAESTRO posicionado en la fila del juicio (para editarlo directo). */
@@ -682,7 +681,15 @@
 
   function bloquearHon(msg) {
     hon.pin = null; hon.datos = null; hon.msgPin = msg || '';
+    actualizarBtnHon();
     if (estado.vista === 'honorarios') pintarPin();
+  }
+
+  // Botón $ del encabezado: la dirección de HONORARIOS llega recién con el PIN; bloqueado, lleva a la pantalla del PIN.
+  function actualizarBtnHon() {
+    var b = $('btn-honorarios'), u = hon.pin && hon.datos && hon.datos.planilla && hon.datos.planilla.url;
+    b.hidden = !estado.cfg;
+    if (u) b.href = u; else b.removeAttribute('href');
   }
   function usoHon() { hon.ultimoUso = Date.now(); }
   setInterval(function () { if (hon.pin && Date.now() - hon.ultimoUso > HON_INACTIVO_MS) bloquearHon('Se bloqueó por 10 minutos sin uso.'); }, 30000);
@@ -738,6 +745,8 @@
   }
   var TIPOS_CRUCE = {
     DUPLICADO: 'Posibles filas repetidas (inflan el total por cobrar)',
+    AMARILLO_SIN_FECHA: 'En amarillo (cobrado) pero sin FECHA DE PAGO',
+    PAGO_EN_FUCSIA: 'Con FECHA DE PAGO pero todavía en fucsia',
     COBRO_SIN_FECHA: 'Dice que se cobró, pero falta la FECHA DE PAGO',
     COBRADO_MAESTRO: 'Ya cobrados: falta cambiar el ESTADO en el MAESTRO',
     SAE_NUEVO: 'Movimientos del SAE que no están en HONORARIOS',
@@ -765,6 +774,7 @@
       hon.cargando = false;
       if (!hon.pin) return;                                    // se bloqueó mientras cargaba
       hon.datos = d;
+      actualizarBtnHon();
       if (estado.vista === 'honorarios') pintarHonorarios();
       if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios' && hon.pin) cargarHonorarios(); }, 30000);
     }).catch(function (e) {
@@ -841,7 +851,7 @@
         'Semana pasada (' + fechaIsoCorta(d.semana.desde) + ' – ' + fechaIsoCorta(d.semana.hasta) + ')'),
       h('button', { type: 'button', class: hon.periodo === 'primer' ? 'activo' : '', onclick: function () { hon.periodo = 'primer'; pintarHonorarios(); } },
         'Agosto – octubre'));
-    var yaCobrados = per.lista.filter(function (x) { return x.pago; }).length;
+    var yaCobrados = per.lista.filter(function (x) { return x.pago || x.color === '#ffff00'; }).length;
     cont.appendChild(h('div', { class: 'anio' }, 'Honorarios tramitados', h('small', { text: per.lista.length + ' juicios' + (yaCobrados ? ' · ' + yaCobrados + ' ya cobrados' : '') })));
     cont.appendChild(seg);
     if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay movimientos cargados en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
@@ -902,6 +912,7 @@
   function tarjetaHon(x, movs) {
     var dias = x.ult ? diasDesdeIso(x.ult.fecha) : null;
     var chip = x.pago ? h('span', { class: 'chip-tipo', text: 'COBRADO ' + fechaIsoCorta(x.pago) })
+             : x.color === '#ffff00' ? h('span', { class: 'chip-tipo', text: 'COBRADO (sin fecha)' })
                       : h('span', { class: 'chip-tipo cancela', text: 'PENDIENTE' });
     var card = h('div', { class: 'item-rev', style: x.color ? 'border-left:6px solid ' + x.color : null, title: x.colorNombre ? 'Marcado en ' + x.colorNombre + ' en la planilla' : null },
       h('div', { class: 'fila-panel' }, h('b', { text: x.d }), h('span', { class: 'monto', text: importe(x.monto) })),
@@ -1162,6 +1173,13 @@
     document.querySelectorAll('.pestana').forEach(function (b) { b.addEventListener('click', function () { cambiarVista(b.dataset.vista); }); });
     $('btn-presentados').addEventListener('click', marcarPresentados);
     ['pointerdown', 'keydown', 'scroll'].forEach(function (ev) { $('honorarios').addEventListener(ev, usoHon, { passive: true }); });
+    $('btn-honorarios').addEventListener('click', function (ev) {
+      if (hon.pin && hon.datos) { usoHon(); return; }               // desbloqueado: abre la planilla
+      ev.preventDefault();
+      hon.msgPin = 'Ingresá el PIN para abrir la planilla HONORARIOS.';
+      cambiarVista('honorarios');
+    });
+    actualizarBtnHon();
     if (estado.cfg) api({ a: 'escritos' }).then(function (d) { firmar.datos = d; if (d.porFirmar) contarFirmar(d.porFirmar.length); }).catch(function () {});
     q.addEventListener('input', render);
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });
