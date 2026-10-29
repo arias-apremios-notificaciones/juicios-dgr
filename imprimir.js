@@ -193,6 +193,24 @@ var Impresion = (function () {
                tabla(cols, filas(p.dormidos), ['SUBTOTAL', '', pesos(suma(p.dormidos)), '', '', ''])] });
   }
 
+  // ───────── 9b. Listado semanal de honorarios (horizontal, con ☐ para trabajar en papel) ─────────
+  function semanal(L, filtro) {
+    filtro = filtro || function () { return true; };
+    var cols = [{ t: '✓', chk: true }, { t: 'Demandado' }, { t: 'Expte.' }, { t: 'Saldo', num: true }, { t: 'Motivo / próximo paso' }, { t: 'Último movimiento' }];
+    var cuerpo = [];
+    [['CUOTA', 'Cuotas que vencen'], ['PRIORIDAD', 'Prioridad: fondos embargados, orden de pago, fechas anotadas'], ['RESTO', 'Resto de los pendientes']].forEach(function (g) {
+      var lista = L.grupos[g[0]].filter(filtro);
+      if (!lista.length) return;
+      cuerpo.push(h('h2', { text: g[1] + ' (' + lista.length + ')' }));
+      cuerpo.push(tabla(cols, lista.map(function (x) {
+        return [x.tramitado ? '✓' : '☐', x.d, x.e, pesos(x.saldo != null ? x.saldo : x.monto), [x.motivo, x.paso ? '→ ' + x.paso.texto : ''].filter(Boolean).join(' · '),
+                x.ult ? fIso(x.ult.fecha) + ' · ' + x.ult.texto : '—'];
+      })));
+    });
+    imprimir({ tipo: 'semanal', horizontal: true, marca: 'CONFIDENCIAL', titulo: 'HONORARIOS · LISTADO SEMANAL',
+      lineas: ['Semana del ' + fIso(L.lunes) + ' al ' + fIso(L.domingo) + ' · ' + L.cantidad + ' pendientes · saldo ' + pesos(L.total), 'Tramitados: ' + L.tramitados + ' · cobrados esta semana: ' + L.cobrados.length], cuerpo: cuerpo });
+  }
+
   // ───────── 10. Para revisar (honorarios) ─────────
   function paraRevisar(cruces, tipos) {
     var cuerpo = [];
@@ -213,7 +231,7 @@ var Impresion = (function () {
   }
 
   return { enLetras: enLetras, deuda: deuda, ficha: ficha, paraFirmar: paraFirmar, revision: revision, documentoSae: documentoSae,
-           cobrosMes: cobrosMes, tramitados: tramitados, cartera: cartera, paraRevisar: paraRevisar, listado: listado };
+           cobrosMes: cobrosMes, tramitados: tramitados, cartera: cartera, semanal: semanal, paraRevisar: paraRevisar, listado: listado };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Impresion;

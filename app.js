@@ -965,7 +965,12 @@
       h('div', { class: 'fila-panel', style: 'margin-top:8px' }, h('div', { class: 'ayuda chica', text: infoSae }), btnSae),
       h('div', { class: 'botones-hon' },
         h('button', { class: 'btn', type: 'button', onclick: function () { bloquearHon('Bloqueado.'); } }, '🔒 Bloquear'),
-        h('button', { class: 'btn', type: 'button', onclick: cambiarPin }, 'Cambiar PIN'))));
+        h('button', { class: 'btn', type: 'button', onclick: cambiarPin }, 'Cambiar PIN'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { hon.verDatosPago = !hon.verDatosPago; pintarHonorarios(); } }, 'Datos para transferencia')),
+      hon.verDatosPago ? formDatosPago(d.datosPago || {}) : null));
+
+    // LISTADO DE LA SEMANA: todos los pendientes; salen solo cuando se cobran (29/10/2026)
+    pintarListadoSemanal(cont, d);
 
     // Cobrado el mes anterior (reporte mensual)
     var m = d.mes;
@@ -999,33 +1004,6 @@
     if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay movimientos cargados en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
     per.lista.forEach(function (x) { cont.appendChild(tarjetaHon(x, x.movs)); });
 
-    // Pendientes (la lista que se va depurando con los cobros)
-    var dp = h('details', { class: 'grupo', open: true }, h('summary', { text: 'Pendientes con movimiento desde agosto (' + p.activos.length + ')' }),
-      h('p', { class: 'ayuda chica', text: 'Se van yendo de la lista a medida que se cargan los cobros (FECHA DE PAGO). Arriba, los que hace más tiempo que no se mueven.' }));
-    // Filtro por el color con que Carlos marca las filas en la planilla (fucsia = trámite reciente)
-    var colores = {};
-    p.activos.concat(p.dormidos).forEach(function (x) { if (x.color) colores[x.color] = (colores[x.color] || 0) + 1; });
-    var listaColores = Object.keys(colores).sort(function (a, b) { return colores[b] - colores[a]; });
-    if (listaColores.length) {
-      var segC = h('div', { class: 'seg' }, h('button', { type: 'button', class: hon.soloColor ? '' : 'activo', onclick: function () { hon.soloColor = ''; pintarHonorarios(); } }, 'Todos'));
-      listaColores.forEach(function (c) {
-        var nom = (p.activos.concat(p.dormidos).filter(function (x) { return x.color === c; })[0] || {}).colorNombre || 'color';
-        segC.appendChild(h('button', { type: 'button', class: hon.soloColor === c ? 'activo' : '', onclick: function () { hon.soloColor = c; pintarHonorarios(); } },
-          h('span', { class: 'punto', style: 'background:' + c }), ' ' + nom + ' (' + colores[c] + ')'));
-      });
-      dp.appendChild(segC);
-    }
-    var filtroC = function (x) { return !hon.soloColor || x.color === hon.soloColor; };
-    dp.appendChild(h('div', { class: 'botones-hon' }, h('button', { class: 'btn', type: 'button', onclick: function () {
-      Impresion.cartera({ desde: p.desde, total: p.total, activos: p.activos.filter(filtroC), dormidos: p.dormidos.filter(filtroC) }, d.hoy);
-    } }, '🖨 Imprimir cartera')));
-    p.activos.filter(filtroC).forEach(function (x) { dp.appendChild(tarjetaHon(x, null)); });
-    cont.appendChild(dp);
-    var dd = h('details', { class: 'grupo', open: !!hon.soloColor }, h('summary', { text: 'Sin movimiento desde antes de agosto (' + p.dormidos.filter(filtroC).length + ')' }),
-      h('p', { class: 'ayuda chica', text: 'Ordenados por monto, de mayor a menor.' }));
-    p.dormidos.filter(filtroC).forEach(function (x) { dd.appendChild(tarjetaHon(x, null)); });
-    cont.appendChild(dd);
-
     // Para revisar: cruce HONORARIOS × MAESTRO × SAE
     var dr = h('details', { class: 'grupo', open: d.cruces.length > 0 }, h('summary', { text: 'Para revisar (' + d.cruces.length + ')' }),
       h('p', { class: 'ayuda chica', text: 'Diferencias entre HONORARIOS, el MAESTRO y el SAE. Corregí la planilla y el aviso desaparece solo; si no corresponde, tocá "No corresponde".' }),
@@ -1053,6 +1031,182 @@
       });
     });
     cont.appendChild(dr);
+  }
+
+  function formDatosPago(dp) {
+    var campos = [['titular', 'Titular'], ['cuit', 'CUIT'], ['banco', 'Banco'], ['cbu', 'CBU / CVU (22 números)'], ['alias', 'Alias']];
+    var inputs = {};
+    var f = h('form', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: 'Van en los mensajes de reclamo. Se guardan en tu Google (protegidos por el PIN).' }),
+      campos.map(function (c) { inputs[c[0]] = h('input', { class: 'campo-form', value: dp[c[0]] || '', placeholder: c[1], 'aria-label': c[1] }); return inputs[c[0]]; }),
+      h('button', { class: 'btn primario', type: 'submit' }, 'Guardar datos'));
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var b = { a: 'honDatosPago', pin: hon.pin };
+      Object.keys(inputs).forEach(function (k) { b[k] = inputs[k].value; });
+      apiPost(b).then(function () { hon.verDatosPago = false; aviso('Datos guardados'); cargarHonorarios(); }).catch(function (e) { aviso(traducirError(e)); });
+    });
+    return f;
+  }
+
+  var GRUPOS_SEMANA = [['CUOTA', 'Cuotas que vencen', true], ['PRIORIDAD', 'Prioridad: fondos embargados, orden de pago, fechas anotadas', true], ['RESTO', 'Resto de los pendientes (por monto)', false]];
+
+  function pintarListadoSemanal(cont, d) {
+    var L = d.listado;
+    if (!L) return;
+    var ant = L.anteriores || [];
+    var inicio = ant.filter(function (a) { return a.lunes === L.lunes; })[0];
+    var previa = ant.filter(function (a) { return a.lunes < L.lunes; })[0];
+    var montoCobrado = L.cobrados.reduce(function (t, x) { return t + (x.cuota ? x.cuota.monto : (x.monto || 0)); }, 0);
+    var pct = L.cantidad ? Math.round(L.tramitados / L.cantidad * 100) : 0;
+    var cab = h('div', { class: 'panel panel-semana' },
+      h('div', { class: 'fila-panel' }, h('h2', { text: 'Semana del ' + fechaIsoCorta(L.lunes) + ' al ' + fechaIsoCorta(L.domingo) }), h('b', { class: 'monto-grande', text: importe(L.total) })),
+      h('div', { class: 'ayuda chica', text: L.cantidad + ' honorarios pendientes · salen de la lista solo cuando se cobran' }),
+      h('div', { class: 'progreso', title: pct + '%' }, h('span', { style: 'width:' + pct + '%' })),
+      h('div', { class: 'ayuda chica', text: 'Tramitados esta semana: ' + L.tramitados + ' de ' + L.cantidad + ' · Cobrados: ' + L.cobrados.length + (L.cobrados.length ? ' (' + importe(montoCobrado) + ')' : '') }),
+      inicio || previa ? h('div', { class: 'ayuda chica', text: (inicio ? 'Al empezar la semana: ' + inicio.pendientes + ' (' + importe(inicio.saldo) + '). ' : '') +
+        (previa ? 'Semana anterior: ' + previa.pendientes + ' pendientes' + (inicio ? (inicio.pendientes < previa.pendientes ? ' → la lista se achicó en ' + (previa.pendientes - inicio.pendientes) + '.' : ' → la lista NO se achicó.') : '.') : '') }) : null,
+      h('div', { class: 'botones-hon' },
+        h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.semanal(L, filtro); } }, iconoImpresora(), 'Imprimir listado'),
+        ant[0] && ant[0].pdf ? h('a', { class: 'btn', href: ant[0].pdf, target: '_blank', rel: 'noopener' }, 'PDF del domingo ↗') : null));
+    cont.appendChild(cab);
+
+    // Filtro por color de la planilla (fucsia = trámite reciente)
+    var todos = [].concat(L.grupos.CUOTA, L.grupos.PRIORIDAD, L.grupos.RESTO), colores = {};
+    todos.forEach(function (x) { if (x.color) colores[x.color] = (colores[x.color] || 0) + 1; });
+    var filtro = function (x) { return !hon.soloColor || x.color === hon.soloColor; };
+    var lc = Object.keys(colores).sort(function (a, b) { return colores[b] - colores[a]; });
+    if (lc.length) {
+      var segC = h('div', { class: 'seg' }, h('button', { type: 'button', class: hon.soloColor ? '' : 'activo', onclick: function () { hon.soloColor = ''; pintarHonorarios(); } }, 'Todos (' + todos.length + ')'));
+      lc.forEach(function (c) {
+        var nom = (todos.filter(function (x) { return x.color === c; })[0] || {}).colorNombre || 'color';
+        segC.appendChild(h('button', { type: 'button', class: hon.soloColor === c ? 'activo' : '', onclick: function () { hon.soloColor = c; pintarHonorarios(); } },
+          h('span', { class: 'punto', style: 'background:' + c }), ' ' + nom + ' (' + colores[c] + ')'));
+      });
+      cont.appendChild(segC);
+    }
+    GRUPOS_SEMANA.forEach(function (g) {
+      var lista = L.grupos[g[0]].filter(filtro);
+      if (!lista.length) return;
+      hon.abiertos = hon.abiertos || {};
+      var abierto = g[0] in hon.abiertos ? hon.abiertos[g[0]] : g[2];
+      var det = h('details', { class: 'grupo', open: abierto }, h('summary', { text: g[1] + ' (' + lista.length + ' · ' + importe(lista.reduce(function (t, x) { return t + (x.saldo || 0); }, 0)) + ')' }));
+      det.addEventListener('toggle', function () { hon.abiertos[g[0]] = det.open; });
+      lista.forEach(function (x) { det.appendChild(tarjetaSemana(x, d)); });
+      cont.appendChild(det);
+    });
+    if (L.cobrados.length) {
+      var dc = h('details', { class: 'grupo' }, h('summary', { text: 'Cobrados esta semana (' + L.cobrados.length + ')' }));
+      L.cobrados.forEach(function (x) {
+        dc.appendChild(h('div', { class: 'item-rev cobrado-sem' }, h('b', { text: '✓ ' + x.d }),
+          h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · ' + (x.cuota ? 'cuota ' + x.cuota.n + '/' + x.cuota.de + ' · ' + importe(x.cuota.monto) : importe(x.monto)) })));
+      });
+      cont.appendChild(dc);
+    }
+  }
+
+  function tarjetaSemana(x, d) {
+    var area = h('div', { class: 'area-accion' });
+    var card = h('div', { class: 'item-rev' + (x.tramitado ? ' tramitado' : ''), style: x.color ? 'border-left:6px solid ' + x.color : null },
+      h('div', { class: 'fila-panel' }, h('b', { text: x.d }), h('span', { class: 'monto', text: importe(x.saldo != null ? x.saldo : x.monto) })),
+      h('div', { class: 'meta' }, 'Expte. ' + x.e + (x.n ? ' · ' + x.n : '') + ' ', x.tramitado ? h('span', { class: 'chip-tipo', text: 'TRAMITADO ESTA SEMANA' }) : null),
+      x.motivo ? h('div', { class: 'motivo', text: x.motivo }) : null,
+      x.plan ? h('div', { class: 'meta', text: 'Plan: ' + x.plan.cantidad + ' cuotas de ' + importe(x.plan.monto) + ' · pagadas ' + x.plan.pagadas + (x.plan.proximo ? ' · próxima ' + fechaIso(x.plan.proximo) : '') }) : null,
+      h('div', { class: 'motivo tranquilo', text: x.ult ? 'Último: ' + fechaIso(x.ult.fecha) + ' (' + diasTexto(diasDesdeIso(x.ult.fecha)) + ') · ' + x.ult.texto : 'Sin movimientos con fecha' }),
+      x.paso ? h('div', { class: 'paso', text: '→ Tu próximo paso: ' + x.paso.texto }) : null,
+      h('div', { class: 'botones-hon' },
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'anotar', x, d); } }, 'Anotar'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'reclamar', x, d); } }, 'Reclamar'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, x.plan ? 'cuota' : 'cobro', x, d); } }, x.plan ? 'Cobrar cuota' : 'Cobro'),
+        x.plan ? null : h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'plan', x, d); } }, 'Cuotas'),
+        linkHon(x.r, 'Fila ↗')),
+      area);
+    return card;
+  }
+
+  function hoyInput() { var t = new Date(); return t.getFullYear() + '-' + ('0' + (t.getMonth() + 1)).slice(-2) + '-' + ('0' + t.getDate()).slice(-2); }
+  function isoADmy(i) { return i ? i.slice(8, 10) + '/' + i.slice(5, 7) + '/' + i.slice(0, 4) : ''; }
+
+  /** Escribe en HONORARIOS (con confirmación) y recarga la pestaña. */
+  function escribirHon(cuerpo, pregunta, ok) {
+    if (!confirm(pregunta)) return Promise.resolve(false);
+    cuerpo.pin = hon.pin;
+    return apiPost(cuerpo).then(function (r) { aviso(ok + (r.linea ? ': ' + r.linea : '')); cargarHonorarios(); return true; })
+      .catch(function (e) { aviso('No se pudo: ' + traducirError(e)); return false; });
+  }
+
+  function mensajeReclamo(x, dp) {
+    var l = ['Estimados: me comunico por los honorarios regulados en el juicio "PROVINCIA DE TUCUMÁN –D.G.R.– c/ ' + x.d + ' s/ Ejecución Fiscal", Expte. N° ' + x.e + (x.n ? ' (' + x.n + ')' : '') + '.',
+             'El importe a abonar es de ' + importe(x.plan ? x.plan.monto : (x.saldo != null ? x.saldo : x.monto)) + (x.plan ? ' (cuota ' + (x.plan.pagadas + 1) + ' de ' + x.plan.cantidad + ')' : '') + '.'];
+    if (dp.cbu || dp.alias) {
+      l.push('', 'Datos para la transferencia:');
+      if (dp.titular) l.push('Titular: ' + dp.titular);
+      if (dp.cuit) l.push('CUIT: ' + dp.cuit);
+      if (dp.banco) l.push('Banco: ' + dp.banco);
+      if (dp.cbu) l.push('CBU/CVU: ' + dp.cbu);
+      if (dp.alias) l.push('Alias: ' + dp.alias);
+    }
+    l.push('', 'Una vez realizado el pago, les pido que me envíen el comprobante para emitir la factura. Quedo a disposición.', '', 'Dr. Carlos E. Arias', 'Apoderado Fiscal – DGR Tucumán – Mat. 4831');
+    return l.join('\n');
+  }
+
+  function accion(area, tipo, x, d) {
+    if (area.dataset.tipo === tipo) { area.textContent = ''; area.dataset.tipo = ''; return; }
+    area.textContent = ''; area.dataset.tipo = tipo;
+    var base = { r: x.r, e: x.e };
+    function form(hijos, alEnviar) {
+      var f = h('form', { class: 'form-hon' }, hijos);
+      f.addEventListener('submit', function (ev) { ev.preventDefault(); alEnviar(); });
+      area.appendChild(f);
+      var primero = f.querySelector('input,textarea,select'); if (primero) setTimeout(function () { primero.focus(); }, 50);
+    }
+    if (tipo === 'anotar') {
+      var ta = h('textarea', { class: 'campo-form', rows: '2', placeholder: 'Qué hiciste hoy (se anota con la fecha de hoy)' });
+      var rapidos = ['LE MANDÉ MSJ RECLAMANDO HONORARIOS', 'PIDO ORDEN DE PAGO', 'ACTUALIZO PLANILLA POR HONORARIOS', 'PRESENTO EN EL REGISTRO DE HONORARIOS', 'PIDO EMBARGO POR HONORARIOS'];
+      form([ta, h('div', { class: 'seg' }, rapidos.map(function (t) { return h('button', { type: 'button', onclick: function () { ta.value = t; } }, t); })),
+            h('button', { class: 'btn primario', type: 'submit' }, 'Anotar en HONORARIOS')], function () {
+        escribirHon(Object.assign({ a: 'honAnotar', texto: ta.value }, base), 'Se agrega en HONORARIOS (fila ' + x.r + '):\n\n- ' + isoADmy(hoyInput()) + ': ' + ta.value.toUpperCase(), 'Anotado');
+      });
+    } else if (tipo === 'reclamar') {
+      var dp = d.datosPago || {}, msg = mensajeReclamo(x, dp);
+      var mail = (String(x.contacto || '').match(/[\w.+-]+@[\w-]+(\.[\w-]+)+/) || [])[0];
+      var wa = 'https://wa.me/' + (x.telefono ? '549' + x.telefono : '') + '?text=' + encodeURIComponent(msg);
+      var anotarTras = function (t) {
+        area.appendChild(h('div', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: '¿Lo mandaste? Anotalo en HONORARIOS:' }),
+          h('button', { class: 'btn primario', type: 'button', onclick: function () { escribirHon(Object.assign({ a: 'honAnotar', texto: t }, base), 'Se agrega en HONORARIOS:\n\n- ' + isoADmy(hoyInput()) + ': ' + t, 'Anotado'); } }, 'Anotar: ' + t)));
+      };
+      area.appendChild(h('div', { class: 'form-hon' },
+        !dp.cbu && !dp.alias ? h('div', { class: 'alerta', text: 'Todavía no cargaste tus datos para transferencia (botón "Datos para transferencia", arriba).' }) : null,
+        h('pre', { class: 'msg-reclamo', text: msg }),
+        h('div', { class: 'botones-hon' },
+          h('a', { class: 'btn primario', href: wa, target: '_blank', rel: 'noopener', onclick: function () { anotarTras('LE MANDÉ WHATSAPP' + (x.telefono ? ' AL ' + x.telefono : '') + ' RECLAMANDO HONORARIOS: ' + importe(x.saldo != null ? x.saldo : x.monto)); } }, 'WhatsApp' + (x.telefono ? '' : ' (elegís el contacto)')),
+          h('a', { class: 'btn', href: 'mailto:' + (mail || '') + '?subject=' + encodeURIComponent('Honorarios – Expte. ' + x.e + ' – ' + x.d) + '&body=' + encodeURIComponent(msg),
+                   onclick: function () { anotarTras('LE MANDÉ MAIL' + (mail ? ' A ' + mail : '') + ' RECLAMANDO HONORARIOS: ' + importe(x.saldo != null ? x.saldo : x.monto)); } }, 'Mail' + (mail ? ' a ' + mail : '')),
+          h('button', { class: 'btn', type: 'button', onclick: function () { copiar(msg, 'Mensaje copiado'); } }, 'Copiar'))));
+    } else if (tipo === 'cobro' || tipo === 'cuota') {
+      var fe = h('input', { class: 'campo-form', type: 'date', value: hoyInput(), 'aria-label': 'Fecha de pago' });
+      var mo = h('select', { class: 'campo-form', 'aria-label': 'Modo de pago' }, h('option', { value: '', text: 'Modo de pago…' }), (d.modosPago || []).map(function (m) { return h('option', { value: m, text: m }); }));
+      var fa = h('input', { class: 'campo-form', placeholder: 'Factura / recibo (opcional)', 'aria-label': 'Factura' });
+      var cuotaTxt = x.plan ? 'cuota ' + (x.plan.pagadas + 1) + ' de ' + x.plan.cantidad + ' (' + importe(x.plan.monto) + ')' : '';
+      form([h('div', { class: 'ayuda chica', text: tipo === 'cuota' ? 'Cobro de la ' + cuotaTxt + '.' + (x.plan.pagadas + 1 === x.plan.cantidad ? ' Es la última: la fila queda cobrada (amarilla).' : ' Sale de la lista hasta la semana del próximo vencimiento.')
+                                                      : 'Se completa FECHA DE PAGO, MODO y FACTURA, y la fila se pinta de amarillo.' }), fe, mo, fa,
+            h('button', { class: 'btn primario', type: 'submit' }, tipo === 'cuota' ? 'Registrar cobro de la cuota' : 'Registrar cobro')], function () {
+        if (!mo.value) { aviso('Elegí el modo de pago'); return; }
+        escribirHon(Object.assign({ a: tipo === 'cuota' ? 'honCuota' : 'honCobro', fecha: isoADmy(fe.value), modo: mo.value, factura: fa.value }, base),
+          (tipo === 'cuota' ? '¿Registrar el cobro de la ' + cuotaTxt : '¿Registrar el cobro de ' + importe(x.saldo != null ? x.saldo : x.monto)) + ' de ' + x.d + ' (' + x.e + ')?\n\nFecha: ' + isoADmy(fe.value) + ' · ' + mo.value + (fa.value ? ' · Factura ' + fa.value : ''), 'Cobro registrado');
+      });
+    } else if (tipo === 'plan') {
+      var n = h('input', { class: 'campo-form', type: 'number', min: '2', max: '36', value: '3', 'aria-label': 'Cantidad de cuotas' });
+      var mc = h('input', { class: 'campo-form', type: 'number', step: '0.01', 'aria-label': 'Monto de cada cuota' });
+      var pr = h('input', { class: 'campo-form', type: 'date', value: hoyInput(), 'aria-label': 'Vencimiento de la primera cuota' });
+      var calc = function () { if (x.saldo) mc.value = (Math.round(x.saldo / Math.max(2, Number(n.value) || 2) * 100) / 100).toFixed(2); };
+      n.addEventListener('input', calc); calc();
+      form([h('div', { class: 'ayuda chica', text: 'Plan de pago de los honorarios: cantidad de cuotas, monto de cada una y vencimiento de la primera (las demás, el mismo día de cada mes).' }),
+            h('label', { class: 'etiqueta', text: 'Cuotas' }), n, h('label', { class: 'etiqueta', text: 'Monto de cada cuota' }), mc, h('label', { class: 'etiqueta', text: '1ª cuota vence' }), pr,
+            h('button', { class: 'btn primario', type: 'submit' }, 'Guardar plan de cuotas')], function () {
+        escribirHon(Object.assign({ a: 'honPlanCuotas', cantidad: n.value, monto: mc.value, primera: isoADmy(pr.value) }, base),
+          'Plan de ' + n.value + ' cuotas de ' + importe(Number(mc.value)) + ', 1ª el ' + isoADmy(pr.value) + ', para ' + x.d + ' (' + x.e + '). ¿Confirmás?', 'Plan guardado');
+      });
+    }
   }
 
   function tarjetaHon(x, movs) {
