@@ -62,6 +62,7 @@
   <main id="honorarios" hidden></main>
   <div id="barra-acciones" class="barra-acciones" hidden>
     <span id="acciones-texto"></span>
+    <button type="button" class="btn" id="btn-imprimir-lote">Imprimir juntos</button>
     <button type="button" class="btn primario" id="btn-presentados">Marcar como presentados</button>
   </div>
 
@@ -104,6 +105,7 @@
     <div class="hoja-cuerpo">
       <div class="hoja-cabecera">
         <h2 id="doc-titulo">Movimiento</h2>
+        <button type="button" class="btn" id="doc-imprimir">Imprimir</button>
         <button type="button" class="icono-btn" id="doc-cerrar" aria-label="Cerrar">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
@@ -115,6 +117,7 @@
   <div id="aviso" class="aviso" role="status" hidden></div>
 
   <script src="buscar.js"></script>
+  <script src="imprimir.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

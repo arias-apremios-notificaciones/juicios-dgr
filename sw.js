@@ -1,7 +1,7 @@
 /* Juicios DGR — service worker: guarda la app para abrirla sin señal.
    Los datos no pasan por acá (son de otro dominio y viven en la copia local). */
-var CACHE = 'jdgr-v20';
-var ARCHIVOS = ['./', 'index.html', 'estilos.css', 'app.js', 'buscar.js', 'manifest.webmanifest',
+var CACHE = 'jdgr-v21';
+var ARCHIVOS = ['./', 'index.html', 'estilos.css', 'app.js', 'buscar.js', 'imprimir.js', 'manifest.webmanifest',
                 'icons/icono.svg', 'icons/icono-180.png', 'icons/icono-192.png', 'icons/icono-512.png'];
 
 self.addEventListener('install', function (e) {

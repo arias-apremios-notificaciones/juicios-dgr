@@ -166,7 +166,8 @@
         h('p', { text: 'Probá con otra parte del nombre, el número sin el año o el CUIT.' })));
       return;
     }
-    contenido.appendChild(h('p', { class: 'resumen', text: res.length === 1 ? '1 juicio' : res.length + (res.length === 60 ? '+' : '') + ' juicios' }));
+    contenido.appendChild(h('p', { class: 'resumen' }, res.length === 1 ? '1 juicio' : res.length + (res.length === 60 ? '+' : '') + ' juicios',
+      res.length > 1 ? h('a', { href: '#', class: 'imp-link', onclick: function (ev) { ev.preventDefault(); Impresion.listado('Búsqueda "' + texto + '"', res.map(function (r) { return estado.filas[r.i]; })); }, text: 'Imprimir lista' }) : null));
     res.forEach(function (r) { contenido.appendChild(tarjeta(estado.filas[r.i], res.length === 1)); });
   }
 
@@ -231,8 +232,9 @@
       dato('Último mov.', ultimoMovIso(f) ? ultimoMovIso(f).split('-').reverse().join('/') : '—'),
       dato('Fila MAESTRO', String(f.r))));
     det.appendChild(cajaEstado(f));
-    if (urlFilaMaestro(f)) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:2px 0 4px' },
-      h('a', { href: urlFilaMaestro(f), target: '_blank', rel: 'noopener', text: 'Abrir en el MAESTRO (fila ' + f.r + ') ↗' })));
+    det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:2px 0 4px;display:flex;gap:14px;flex-wrap:wrap' },
+      urlFilaMaestro(f) ? h('a', { href: urlFilaMaestro(f), target: '_blank', rel: 'noopener', text: 'Abrir en el MAESTRO (fila ' + f.r + ') ↗' }) : null,
+      h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.ficha(f, lineas, f._sae); }, text: 'Imprimir ficha' })));
 
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
@@ -286,7 +288,8 @@
       caja.appendChild(h('p', { class: 'ayuda chica', text: 'Importes a la fecha de emisión de las boletas; se agregan intereses hasta el pago. Consulta guardada temporalmente (30 días): no se incorpora al MAESTRO.' }));
       var nombre = 'Detalle de deuda ' + f.e.replace(/\//g, '-');
       caja.appendChild(h('div', { class: 'botones' },
-        h('button', { class: 'btn primario', type: 'button', onclick: function () { exportarArchivo(d.csv, nombre + '.csv', 'text/csv'); } }, 'Exportar (Excel)'),
+        h('button', { class: 'btn primario', type: 'button', onclick: function () { Impresion.deuda(d, f); } }, 'Imprimir'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { exportarArchivo(d.csv, nombre + '.csv', 'text/csv'); } }, 'Exportar (Excel)'),
         h('button', { class: 'btn', type: 'button', onclick: function () { compartirTexto(textoDeuda(d, f), nombre); } }, 'Compartir / copiar'),
         h('button', { class: 'btn', type: 'button', onclick: function () { verDeuda(f, caja, btn, true); } }, 'Volver a leer del SAE')));
       if (d.guardado) caja.appendChild(h('div', { class: 'ayuda chica', text: 'Datos guardados el ' + new Date(d.consultado).toLocaleDateString('es-AR') + '.' }));
@@ -410,6 +413,7 @@
       }
       f.p = r.procid; f.j = r.jurisdiction; f.s = r.estado;
       var s = parsearSae(r.texto);
+      f._sae = s;                                                    // para "Imprimir ficha"
       caja.appendChild(h('div', { class: 'sae-cab' },
         h('b', { text: 'SAE · ' + (s.total ? s.total + ' movimientos' : 'expediente') }),
         h('button', { class: 'leer', type: 'button', onclick: function () { leerDoc(f, 'ultimo', 'Último proveído'); } }, 'Último proveído')));
@@ -440,8 +444,10 @@
     t.textContent = '';
     t.appendChild(h('div', { class: 'cargando-txt', text: 'Trayendo el texto del SAE…' }));
     if (!dlg.open) dlg.showModal();
+    estado.doc = null;
     api({ a: 'doc', p: f.p, j: f.j, h: histid }).then(function (r) {
       t.textContent = r.texto;
+      estado.doc = { titulo: titulo, texto: r.texto, f: f };
     }).catch(function (e) {
       t.textContent = 'No se pudo traer el texto: ' + e.message;
     });
@@ -500,7 +506,31 @@
   }
 
   // ───────── Para firmar (motor de escritos) ─────────
-  var firmar = { datos: null, sel: {}, cargando: false };
+  var firmar = { datos: null, sel: {}, cargando: false, lote: null };
+
+  function imprimirLote() {
+    var ids = Object.keys(firmar.sel);
+    if (!ids.length) return;
+    $('btn-imprimir-lote').disabled = true;
+    apiPost({ a: 'lote', ids: ids }).then(function (r) {
+      $('btn-imprimir-lote').disabled = false;
+      firmar.lote = { job: r.job, ids: ids, estado: 'EN_COLA' };
+      aviso('Armando el PDF para imprimir: 1 o 2 minutos');
+      pintarFirmar(); seguirLote();
+    }).catch(function (e) { $('btn-imprimir-lote').disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+  }
+  function seguirLote() {
+    var L = firmar.lote;
+    if (!L || L.estado !== 'EN_COLA') return;
+    setTimeout(function () {
+      api({ a: 'lote', j: L.job }).then(function (r) {
+        if (firmar.lote !== L) return;
+        Object.assign(L, r);
+        if (estado.vista === 'firmar') pintarFirmar();
+        if (L.estado === 'LISTO') aviso('PDF para imprimir listo'); else seguirLote();
+      }).catch(function () { seguirLote(); });
+    }, 8000);
+  }
 
   function apiPost(cuerpo) {
     var cfg = estado.cfg;
@@ -592,7 +622,19 @@
     cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
       h('div', null, h('h2', { text: 'Pedidos de sentencia (cada 15 días)' }), h('div', { class: 'ayuda chica', text: info })),
       btnAnalizar),
-      h('div', { class: 'ayuda chica' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }))));
+      h('div', { class: 'ayuda chica', style: 'display:flex;gap:14px;flex-wrap:wrap' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }),
+        d.porFirmar.length ? h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.paraFirmar(d.porFirmar); }, text: 'Imprimir lista para firmar' }) : null)));
+
+    // "Imprimir juntos": PDF único con los escritos seleccionados
+    if (firmar.lote) {
+      var L = firmar.lote;
+      cont.appendChild(h('div', { class: 'panel ' + (L.estado === 'LISTO' ? 'caja-ok' : L.estado === 'ERROR' ? 'caja-peligro' : 'caja-aviso') },
+        L.estado === 'LISTO' ? [h('b', { text: '🖨 PDF para imprimir listo (' + L.ids.length + ' escritos)' }), ' ',
+                                 h('a', { class: 'btn primario', href: L.url, target: '_blank', rel: 'noopener', style: 'margin-left:8px' }, 'Abrir PDF'),
+                                 L.faltan && L.faltan.length ? h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'No se encontró el PDF de: ' + L.faltan.join(', ') }) : null]
+        : L.estado === 'ERROR' ? 'No se pudo armar el PDF: ' + L.error
+        : 'Armando un PDF con ' + L.ids.length + ' escritos para imprimir… (1 o 2 minutos)'));
+    }
 
     // IVP de Gmail → comunicaciones de cancelación
     var infoIvp = d.revisandoIvp ? 'Revisando los IVP de Gmail…'
@@ -643,7 +685,8 @@
     // Revisión manual
     if (d.revision.length) {
       var det = h('details', { class: 'grupo' }, h('summary', { text: 'Revisión manual (' + d.revision.length + ')' }),
-        h('p', { class: 'ayuda chica', text: 'El motor no genera escritos para estos juicios: necesitan tu criterio. Tocá uno para ver su ficha.' }));
+        h('p', { class: 'ayuda chica', text: 'El motor no genera escritos para estos juicios: necesitan tu criterio. Tocá uno para ver su ficha.' }),
+        h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.revision('Revisión manual', d.revision); } }, 'Imprimir'));
       porAnio(d.revision).forEach(function (g) {
         det.appendChild(h('div', { class: 'anio' }, 'Juicios ' + g.anio, h('small', { text: String(g.items.length) })));
         g.items.forEach(function (x) {
@@ -662,7 +705,8 @@
       var btn = h('button', { class: 'btn primario', type: 'button' });
       var refrescarBtn = function () { var n = Object.keys(marcados).length; btn.textContent = 'Cambiar ESTADO a SENTENCIA (' + n + ')'; btn.disabled = !n; };
       var det2 = h('details', { class: 'grupo' }, h('summary', { text: 'Ya tienen sentencia en el SAE (' + d.sentenciaYa.length + ')' }),
-        h('p', { class: 'ayuda chica', text: 'En el MAESTRO figuran como INTIMACION / AUTOS P/RESOLVER, pero el SAE ya muestra la sentencia. Destildá los que no quieras cambiar.' }));
+        h('p', { class: 'ayuda chica', text: 'En el MAESTRO figuran como INTIMACION / AUTOS P/RESOLVER, pero el SAE ya muestra la sentencia. Destildá los que no quieras cambiar.' }),
+        h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.revision('Ya tienen sentencia en el SAE', d.sentenciaYa); } }, 'Imprimir'));
       d.sentenciaYa.forEach(function (x) {
         var chk = h('input', { type: 'checkbox', checked: true });
         chk.addEventListener('change', function () { if (chk.checked) marcados[x.e] = true; else delete marcados[x.e]; refrescarBtn(); });
@@ -902,8 +946,9 @@
     m.registrados.forEach(function (x) {
       pm.appendChild(h('div', { class: 'linea-cobro' }, h('span', { text: fechaIsoCorta(x.pago) }), h('span', { text: x.d + ' · ' + x.e }), h('b', { text: importe(x.monto) })));
     });
-    pm.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit;margin-top:8px' },
-      m.pdf ? h('a', { href: m.pdf.url, target: '_blank', rel: 'noopener', text: 'Reporte en PDF ↗' }) : 'El reporte en PDF se genera solo el primer día hábil del mes (carpeta HONORARIOS/REPORTES MENSUALES).'));
+    pm.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap' },
+      m.pdf ? h('a', { href: m.pdf.url, target: '_blank', rel: 'noopener', text: 'Reporte en PDF ↗' }) : h('span', { text: 'El PDF se genera solo el primer día hábil del mes.' }),
+      h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.cobrosMes(m); }, text: 'Imprimir' })));
     cont.appendChild(pm);
     if (m.enTexto.length) {
       var pt = h('div', { class: 'panel caja-aviso' }, h('b', { text: 'Para verificar: el seguimiento menciona ' + (m.enTexto.length === 1 ? 'un cobro' : m.enTexto.length + ' cobros') + ' de ' + m.nombre.toLowerCase() + ' sin FECHA DE PAGO en ese mes' }));
@@ -920,6 +965,7 @@
         'Agosto – octubre'));
     var yaCobrados = per.lista.filter(function (x) { return x.pago || x.color === '#ffff00'; }).length;
     cont.appendChild(h('div', { class: 'anio' }, 'Honorarios tramitados', h('small', { text: per.lista.length + ' juicios' + (yaCobrados ? ' · ' + yaCobrados + ' ya cobrados' : '') })));
+    seg.appendChild(h('button', { type: 'button', onclick: function () { Impresion.tramitados(per, hon.periodo === 'primer' ? 'Primer reporte (agosto – octubre)' : 'Semana anterior'); } }, '🖨 Imprimir'));
     cont.appendChild(seg);
     if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay movimientos cargados en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
     per.lista.forEach(function (x) { cont.appendChild(tarjetaHon(x, x.movs)); });
@@ -941,6 +987,9 @@
       dp.appendChild(segC);
     }
     var filtroC = function (x) { return !hon.soloColor || x.color === hon.soloColor; };
+    dp.appendChild(h('div', { class: 'botones-hon' }, h('button', { class: 'btn', type: 'button', onclick: function () {
+      Impresion.cartera({ desde: p.desde, total: p.total, activos: p.activos.filter(filtroC), dormidos: p.dormidos.filter(filtroC) }, d.hoy);
+    } }, '🖨 Imprimir cartera')));
     p.activos.filter(filtroC).forEach(function (x) { dp.appendChild(tarjetaHon(x, null)); });
     cont.appendChild(dp);
     var dd = h('details', { class: 'grupo', open: !!hon.soloColor }, h('summary', { text: 'Sin movimiento desde antes de agosto (' + p.dormidos.filter(filtroC).length + ')' }),
@@ -950,7 +999,8 @@
 
     // Para revisar: cruce HONORARIOS × MAESTRO × SAE
     var dr = h('details', { class: 'grupo', open: d.cruces.length > 0 }, h('summary', { text: 'Para revisar (' + d.cruces.length + ')' }),
-      h('p', { class: 'ayuda chica', text: 'Diferencias entre HONORARIOS, el MAESTRO y el SAE. Corregí la planilla y el aviso desaparece solo; si no corresponde, tocá "No corresponde".' }));
+      h('p', { class: 'ayuda chica', text: 'Diferencias entre HONORARIOS, el MAESTRO y el SAE. Corregí la planilla y el aviso desaparece solo; si no corresponde, tocá "No corresponde".' }),
+      d.cruces.length ? h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.paraRevisar(d.cruces, TIPOS_CRUCE); } }, '🖨 Imprimir') : null);
     var grupos = {};
     d.cruces.forEach(function (x) { (grupos[x.tipo] = grupos[x.tipo] || []).push(x); });
     Object.keys(TIPOS_CRUCE).forEach(function (t) {
@@ -1239,6 +1289,8 @@
     estado.vista = 'buscar';
     document.querySelectorAll('.pestana').forEach(function (b) { b.addEventListener('click', function () { cambiarVista(b.dataset.vista); }); });
     $('btn-presentados').addEventListener('click', marcarPresentados);
+    $('btn-imprimir-lote').addEventListener('click', imprimirLote);
+    $('doc-imprimir').addEventListener('click', function () { if (estado.doc) Impresion.documentoSae(estado.doc.titulo, estado.doc.texto, estado.doc.f); });
     ['pointerdown', 'keydown', 'scroll'].forEach(function (ev) { $('honorarios').addEventListener(ev, usoHon, { passive: true }); });
     $('btn-honorarios').addEventListener('click', function (ev) {
       if (hon.pin && hon.datos) { usoHon(); return; }               // desbloqueado: abre la planilla
