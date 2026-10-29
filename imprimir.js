@@ -102,18 +102,27 @@ var Impresion = (function () {
     });
   }
 
-  // ───────── 2. Ficha del juicio (uso interno) ─────────
-  function ficha(f, seguimiento, sae) {
-    var datos = [['Deudor', f.d], ['CUIT', cuit(f.c) || '—'], ['Expediente', f.e + (f.n ? ' · Nominación ' + f.n : '')], ['Importe', pesos(f.i)],
-                 ['Estado (MAESTRO)', f.g || '—'], ['Último movimiento', f.k ? fIso(f.k) : '—'], ['Fila del MAESTRO', String(f.r)]];
-    var cuerpo = [h('table', { class: 'imp-datos' }, h('tbody', null, datos.map(function (x) { return h('tr', null, h('th', { text: x[0] }), h('td', { text: x[1] })); }))),
+  // ───────── 2. Estado del juicio (la ficha de Buscar; uso interno) ─────────
+  function ficha(f, seguimiento, sae, deudaJ) {
+    var ult = f.k ? fIso(f.k) : (seguimiento[0] && seguimiento[0].fecha) || '—';
+    var datos = [['Deudor', f.d], ['CUIT', cuit(f.c) || '—'], ['Expediente', f.e + (f.n ? ' · Nominación ' + f.n : '')],
+                 ['Juzgado (SAE)', sae && sae.juzgado ? sae.juzgado : '—'], ['Importe demandado', pesos(f.i)],
+                 ['Último movimiento', ult], ['Fila del MAESTRO', String(f.r)]];
+    var cuerpo = [h('div', { class: 'imp-estado' }, h('span', { text: 'ESTADO' }), h('b', { text: f.g || 'SIN ESTADO' })),
+                  h('table', { class: 'imp-datos' }, h('tbody', null, datos.map(function (x) { return h('tr', null, h('th', { text: x[0] }), h('td', { text: x[1] })); }))),
                   h('h2', { text: 'Seguimiento (MAESTRO)' }),
                   seguimiento.length ? tabla([{ t: 'Fecha' }, { t: 'Movimiento' }], seguimiento.map(function (l) { return [l.fecha || '—', l.texto]; })) : h('p', { text: 'Sin seguimiento cargado.' })];
     if (sae && sae.movs && sae.movs.length) {
-      cuerpo.push(h('h2', { text: 'Movimientos en el SAE' + (sae.caratula ? ' · ' + sae.caratula : '') }));
+      cuerpo.push(h('h2', { text: 'Movimientos en el SAE' + (sae.total ? ' (últimos ' + sae.movs.length + ' de ' + sae.total + ')' : '') }));
       cuerpo.push(tabla([{ t: 'Fecha' }, { t: 'Movimiento' }], sae.movs.map(function (m) { return [m.fecha, m.desc]; })));
+    } else cuerpo.push(h('p', { class: 'imp-nota', text: 'Movimientos del SAE: no consultados.' }));
+    if (deudaJ && deudaJ.encontrado) {
+      cuerpo.push(h('h2', { text: 'Deuda reclamada (boletas de la demanda)' }));
+      cuerpo.push(tabla([{ t: 'Boleta' }, { t: 'Impuesto' }, { t: 'Padrón / dominio' }, { t: 'Importe', num: true }],
+                        deudaJ.boletas.map(function (b) { return [b.numero, b.impuesto, b.padron.replace(/^(Padrón|Dominio) /, ''), b.importe != null ? pesos(b.importe) : '—']; }),
+                        ['', 'TOTAL RECLAMADO', '', pesos(deudaJ.total)]));
     }
-    imprimir({ tipo: 'ficha', marca: 'USO INTERNO', titulo: 'FICHA DEL JUICIO', lineas: [f.d, 'Expte. N° ' + f.e], cuerpo: cuerpo });
+    imprimir({ tipo: 'ficha', marca: 'USO INTERNO', titulo: 'ESTADO DEL JUICIO', lineas: [sae && sae.caratula ? sae.caratula : f.d, 'Expte. N° ' + f.e], cuerpo: cuerpo });
   }
 
   // ───────── 4. Lista "Para firmar" (hoja de control, horizontal) ─────────

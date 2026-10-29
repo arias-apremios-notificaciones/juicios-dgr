@@ -232,9 +232,25 @@
       dato('Último mov.', ultimoMovIso(f) ? ultimoMovIso(f).split('-').reverse().join('/') : '—'),
       dato('Fila MAESTRO', String(f.r))));
     det.appendChild(cajaEstado(f));
-    det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:2px 0 4px;display:flex;gap:14px;flex-wrap:wrap' },
-      urlFilaMaestro(f) ? h('a', { href: urlFilaMaestro(f), target: '_blank', rel: 'noopener', text: 'Abrir en el MAESTRO (fila ' + f.r + ') ↗' }) : null,
-      h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.ficha(f, lineas, f._sae); }, text: 'Imprimir ficha' })));
+    if (urlFilaMaestro(f)) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:2px 0 4px' },
+      h('a', { href: urlFilaMaestro(f), target: '_blank', rel: 'noopener', text: 'Abrir en el MAESTRO (fila ' + f.r + ') ↗' })));
+
+    // Imprimir el estado del juicio: si todavía no se consultó el SAE, primero trae los movimientos
+    // (y después pide un segundo toque: el iPhone solo deja imprimir desde un toque directo).
+    var btnImp = h('button', { class: 'btn', type: 'button' }, iconoImpresora(), f._sae ? 'Imprimir estado del juicio' : 'Imprimir estado del juicio (con SAE)');
+    btnImp.addEventListener('click', function () {
+      if (f._sae || btnImp.dataset.sinSae) { Impresion.ficha(f, lineas, f._sae, f._deuda); return; }
+      btnImp.disabled = true; btnImp.lastChild.textContent = 'Trayendo los movimientos del SAE…';
+      api({ a: 'sae', e: f.e, d: f.d, f: '0' }).then(function (r) {
+        if (r.texto) { f._sae = parsearSae(r.texto); f.p = r.procid; f.j = r.jurisdiction; }
+        else btnImp.dataset.sinSae = '1';
+        btnImp.disabled = false; btnImp.classList.add('primario'); btnImp.lastChild.textContent = 'Listo: tocá para imprimir';
+      }).catch(function () {
+        btnImp.dataset.sinSae = '1';
+        btnImp.disabled = false; btnImp.lastChild.textContent = 'SAE sin respuesta: imprimir sin movimientos';
+      });
+    });
+    det.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 8px' }, btnImp));
 
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
@@ -263,6 +279,13 @@
     det.appendChild(h('section', { class: 'seccion' }, h('h3', { text: 'Deuda · boletas de la demanda' }), h('div', { class: 'botones' }, btnDeuda), deudaCaja));
   }
 
+  function iconoImpresora() {
+    var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<path d="M7 9V3.5h10V9M7 17H4.5A1.5 1.5 0 0 1 3 15.5v-5A1.5 1.5 0 0 1 4.5 9h15a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5H17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><rect x="7" y="13.5" width="10" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="17.5" cy="12" r="1" fill="currentColor"/>';
+    return s;
+  }
+
   function verDeuda(f, caja, btn, forzar) {
     caja.hidden = false; btn.disabled = true;
     caja.textContent = '';
@@ -270,6 +293,7 @@
     api({ a: 'deuda', e: f.e, f: forzar ? '1' : '0' }).then(function (d) {
       btn.disabled = false; caja.textContent = '';
       if (!d.encontrado) { caja.appendChild(h('p', { class: 'ayuda', text: d.motivo || 'No se encontró la demanda.' })); return; }
+      f._deuda = d;                                                  // también sale en "Imprimir estado del juicio"
       var t = h('table', { class: 'tabla-deuda' }, h('thead', null, h('tr', null, h('th', { text: 'Boleta · impuesto · padrón · períodos' }), h('th', { class: 'num', text: 'Importe' }))));
       var tb = h('tbody');
       d.boletas.forEach(function (b) {

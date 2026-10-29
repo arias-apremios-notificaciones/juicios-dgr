@@ -361,6 +361,9 @@ details.grupo[open] > summary::before { content: "▾ "; }
   .imp-datos th { text-align: left; padding: 2px 14px 2px 0; font-weight: 600; white-space: nowrap; }
   .imp-datos td { padding: 2px 0; }
   .imp-letras { font-weight: 600; margin: 6px 0; }
+  .imp-estado { display: flex; align-items: baseline; gap: 10px; border: 2px solid #000; padding: 6px 10px; margin: 2px 0 10px; }
+  .imp-estado span { font-size: 9pt; letter-spacing: 1px; }
+  .imp-estado b { font-size: 14pt; }
   .imp-nota { font-size: 8.5pt; margin-top: 10px; border-top: 1px solid #999; padding-top: 4px; }
   .imp-texto { white-space: pre-wrap; font: 10.5pt/1.45 Georgia, 'Times New Roman', serif; }
   .imp-bloque { page-break-inside: avoid; margin-bottom: 8px; }
