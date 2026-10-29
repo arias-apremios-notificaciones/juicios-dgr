@@ -369,3 +369,8 @@ details.grupo[open] > summary::before { content: "▾ "; }
   .imp-horizontal { font-size: 9pt !important; }
   .imp-deuda .imp-tabla td, .imp-deuda .imp-tabla th { padding: 5px 6px; }
 }
+@media (max-width: 430px) {
+  .barra-acciones { flex-wrap: wrap; gap: 8px; }
+  .barra-acciones span { flex-basis: 100%; }
+  .barra-acciones .btn { flex: 1 1 auto; white-space: nowrap; font-size: 14px; padding-left: 10px; padding-right: 10px; justify-content: center; }
+}
