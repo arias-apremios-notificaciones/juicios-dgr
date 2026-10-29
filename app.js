@@ -514,23 +514,27 @@
     $('btn-imprimir-lote').disabled = true;
     apiPost({ a: 'lote', ids: ids }).then(function (r) {
       $('btn-imprimir-lote').disabled = false;
-      firmar.lote = { job: r.job, ids: ids, estado: 'EN_COLA' };
+      firmar.lote = { job: r.job, ids: ids, estado: 'EN_COLA', desde: Date.now() };
       aviso('Armando el PDF para imprimir: 1 o 2 minutos');
       pintarFirmar(); seguirLote();
     }).catch(function (e) { $('btn-imprimir-lote').disabled = false; aviso('No se pudo: ' + traducirError(e)); });
   }
-  function seguirLote() {
+  // Pregunta cada 5 s si el PDF está listo. El iPhone frena los relojes con la app en segundo plano:
+  // al volver a la app se pregunta en el acto.
+  function seguirLote(ya) {
     var L = firmar.lote;
     if (!L || L.estado !== 'EN_COLA') return;
-    setTimeout(function () {
+    clearTimeout(L.timer);
+    L.timer = setTimeout(function () {
       api({ a: 'lote', j: L.job }).then(function (r) {
         if (firmar.lote !== L) return;
         Object.assign(L, r);
         if (estado.vista === 'firmar') pintarFirmar();
         if (L.estado === 'LISTO') aviso('PDF para imprimir listo'); else seguirLote();
       }).catch(function () { seguirLote(); });
-    }, 8000);
+    }, ya ? 0 : 5000);
   }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) seguirLote(true); });
 
   function apiPost(cuerpo) {
     var cfg = estado.cfg;
@@ -633,7 +637,8 @@
                                  h('a', { class: 'btn primario', href: L.url, target: '_blank', rel: 'noopener', style: 'margin-left:8px' }, 'Abrir PDF'),
                                  L.faltan && L.faltan.length ? h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'No se encontró el PDF de: ' + L.faltan.join(', ') }) : null]
         : L.estado === 'ERROR' ? 'No se pudo armar el PDF: ' + L.error
-        : 'Armando un PDF con ' + L.ids.length + ' escritos para imprimir… (1 o 2 minutos)'));
+        : ['Armando un PDF con ' + L.ids.length + ' escritos para imprimir… (menos de 1 minuto; aparece acá con el botón "Abrir PDF")',
+           Date.now() - L.desde > 180000 && L.carpeta ? h('div', null, h('a', { href: L.carpeta, target: '_blank', rel: 'noopener', text: 'Tarda más de lo normal: abrir la carpeta PARA IMPRIMIR en el Drive ↗' })) : null]));
     }
 
     // IVP de Gmail → comunicaciones de cancelación
