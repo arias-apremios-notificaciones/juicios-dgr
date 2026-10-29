@@ -253,6 +253,73 @@
                  onclick: function () { copiar(f.e); } }, 'Portal SAE ↗')),
       f.s === 'DUDOSO' ? h('div', { class: 'alerta', text: 'Ojo: la carátula del SAE no coincide del todo con el deudor. Verificala.' }) : null,
       saeCaja));
+
+    // 3) DETALLE DE DEUDA: boletas de la demanda (repositorio temporal, 30 días). No toca el MAESTRO.
+    var deudaCaja = h('div', { class: 'deuda', hidden: true });
+    var btnDeuda = h('button', { class: 'btn', type: 'button' }, 'Detalle de deuda');
+    btnDeuda.addEventListener('click', function () { verDeuda(f, deudaCaja, btnDeuda, false); });
+    det.appendChild(h('section', { class: 'seccion' }, h('h3', { text: 'Deuda · boletas de la demanda' }), h('div', { class: 'botones' }, btnDeuda), deudaCaja));
+  }
+
+  function verDeuda(f, caja, btn, forzar) {
+    caja.hidden = false; btn.disabled = true;
+    caja.textContent = '';
+    caja.appendChild(h('div', { class: 'cargando-txt', text: forzar ? 'Leyendo la demanda en el SAE…' : 'Buscando la demanda en el SAE…' }));
+    api({ a: 'deuda', e: f.e, f: forzar ? '1' : '0' }).then(function (d) {
+      btn.disabled = false; caja.textContent = '';
+      if (!d.encontrado) { caja.appendChild(h('p', { class: 'ayuda', text: d.motivo || 'No se encontró la demanda.' })); return; }
+      var t = h('table', { class: 'tabla-deuda' }, h('thead', null, h('tr', null, h('th', { text: 'Boleta · impuesto · padrón · períodos' }), h('th', { class: 'num', text: 'Importe' }))));
+      var tb = h('tbody');
+      d.boletas.forEach(function (b) {
+        tb.appendChild(h('tr', null,
+          h('td', null, h('div', { class: 'nro-boleta', text: b.numero }), h('b', { text: b.impuesto || '—' }), b.detalle ? h('div', { class: 'ayuda chica', text: b.detalle }) : null,
+            h('div', { class: 'ayuda chica', text: [b.padron, b.periodos].filter(Boolean).join(' · ') }),
+            b.original != null ? h('div', { class: 'ayuda chica', text: 'Original ' + importe(b.original) + ' + intereses ' + importe(b.intereses) + (b.al ? ' (al ' + b.al + ')' : '') }) : null),
+          h('td', { class: 'num', text: b.importe != null ? importe(b.importe) : '—' })));
+      });
+      t.appendChild(tb);
+      t.appendChild(h('tfoot', null, h('tr', null, h('td', { text: 'Total reclamado en la demanda' }), h('td', { class: 'num', text: d.total != null ? importe(d.total) : '—' }))));
+      caja.appendChild(h('div', { class: 'ayuda chica', text: 'Demanda del ' + (d.fechaDemanda || '—') + (d.exptesAdm && d.exptesAdm.length ? ' · Expte. adm. ' + d.exptesAdm.join(', ') : '') }));
+      caja.appendChild(t);
+      if (d.verificado) caja.appendChild(h('div', { class: 'ok-deuda', text: '✓ La suma de las boletas coincide con el total de la demanda.' }));
+      (d.avisos || []).forEach(function (a) { caja.appendChild(h('div', { class: 'alerta', text: a })); });
+      caja.appendChild(h('p', { class: 'ayuda chica', text: 'Importes a la fecha de emisión de las boletas; se agregan intereses hasta el pago. Consulta guardada temporalmente (30 días): no se incorpora al MAESTRO.' }));
+      var nombre = 'Detalle de deuda ' + f.e.replace(/\//g, '-');
+      caja.appendChild(h('div', { class: 'botones' },
+        h('button', { class: 'btn primario', type: 'button', onclick: function () { exportarArchivo(d.csv, nombre + '.csv', 'text/csv'); } }, 'Exportar (Excel)'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { compartirTexto(textoDeuda(d, f), nombre); } }, 'Compartir / copiar'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { verDeuda(f, caja, btn, true); } }, 'Volver a leer del SAE')));
+      if (d.guardado) caja.appendChild(h('div', { class: 'ayuda chica', text: 'Datos guardados el ' + new Date(d.consultado).toLocaleDateString('es-AR') + '.' }));
+    }).catch(function (e) {
+      btn.disabled = false; caja.textContent = '';
+      caja.appendChild(h('p', { class: 'error', text: 'No se pudo: ' + traducirError(e) }));
+    });
+  }
+
+  function textoDeuda(d, f) {
+    var l = ['DETALLE DE LA DEUDA', d.caratula || f.d, 'Expte. ' + f.e + (d.juzgado ? ' · ' + d.juzgado : ''), ''];
+    d.boletas.forEach(function (b) {
+      l.push('• Boleta ' + b.numero + ' · ' + (b.impuesto || '') + (b.padron ? ' · ' + b.padron : '') + (b.periodos ? ' · ' + b.periodos : '') + (b.importe != null ? ' · ' + importe(b.importe) : ''));
+    });
+    l.push('', 'Total reclamado en la demanda: ' + (d.total != null ? importe(d.total) : '—'));
+    l.push('Importes a la fecha de emisión de las boletas; se agregan los intereses hasta la fecha de pago.');
+    return l.join('\n');
+  }
+
+  /** En el iPhone abre el menú de compartir con el archivo (guardar en Archivos, WhatsApp, Mail); en la compu lo descarga. */
+  function exportarArchivo(contenido, nombre, tipo) {
+    var archivo = typeof File === 'function' ? new File([contenido], nombre, { type: tipo }) : null;
+    if (archivo && navigator.canShare && navigator.canShare({ files: [archivo] })) {
+      navigator.share({ files: [archivo], title: nombre }).catch(function () {});
+      return;
+    }
+    var a = h('a', { href: URL.createObjectURL(new Blob([contenido], { type: tipo })), download: nombre });
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  function compartirTexto(texto, titulo) {
+    if (navigator.share) navigator.share({ title: titulo, text: texto }).catch(function () {});
+    else copiar(texto, 'Detalle copiado');
   }
 
   // Estados del MAESTRO (los 12 originales + los agregados el 28/10/2026). "OTROS" lleva subestado libre.

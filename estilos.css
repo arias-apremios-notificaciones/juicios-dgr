@@ -325,3 +325,13 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .caja-pin .pin-msg { min-height: 1.2em; color: var(--e-rojo-tx); margin: 0; }
 .seg .punto { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; border: 1px solid rgba(0,0,0,.2); }
 @media (max-width: 400px) { .pildora { max-width: 34vw; } .barra .icono-btn { width: 38px; } }
+
+/* ───────── Detalle de deuda (29/10/2026) ───────── */
+.tabla-deuda { width: 100%; border-collapse: collapse; font-size: 14px; margin: 6px 0; }
+.tabla-deuda th, .tabla-deuda td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--borde); vertical-align: top; }
+.tabla-deuda th { font-size: 12.5px; color: var(--texto-2); font-weight: 600; }
+.tabla-deuda .nro-boleta { font-variant-numeric: tabular-nums; color: var(--texto-2); font-size: 13px; }
+.tabla-deuda .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tabla-deuda tfoot td { font-weight: 700; border-bottom: 0; }
+.ok-deuda { color: var(--e-verde-tx); font-size: 13.5px; margin: 4px 0; }
+@media (max-width: 400px) { .marca span { display: none; } }
