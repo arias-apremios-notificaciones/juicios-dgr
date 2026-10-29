@@ -984,6 +984,25 @@
       m.pdf ? h('a', { href: m.pdf.url, target: '_blank', rel: 'noopener', text: 'Reporte en PDF ↗' }) : h('span', { text: 'El PDF se genera solo el primer día hábil del mes.' }),
       h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.cobrosMes(m); }, text: 'Imprimir' })));
     cont.appendChild(pm);
+    // Facturas emitidas del mes (carpeta FACTURAS <año> del Drive) contra los cobros
+    var F = m.facturas;
+    if (F && !F.error) {
+      var hayProblemas = F.sinFactura.length || F.sinCobro.length || F.diferencias.length;
+      var pf = h('div', { class: 'panel ' + (hayProblemas ? 'caja-aviso' : 'caja-ok') },
+        h('div', { class: 'fila-panel' }, h('b', { text: '🧾 Facturas de ' + m.nombre.toLowerCase() + ': ' + F.cantidad }),
+          F.carpeta ? h('a', { href: F.carpeta, target: '_blank', rel: 'noopener', text: 'Carpeta de facturas ↗' }) : null),
+        h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Neto ' + importe(F.neto) + ' · IVA ' + importe(F.iva) + ' · total ' + importe(F.total) + ' · ' + F.conFactura + ' cobros con su factura' + (F.cartaPago.length ? ' · ' + F.cartaPago.length + ' con carta de pago' : '') }));
+      var lista = function (titulo, items, txt) {
+        if (!items.length) return;
+        pf.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit;margin-top:6px;font-weight:700', text: titulo + ' (' + items.length + ')' }));
+        items.forEach(function (x) { pf.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '· ' + txt(x) })); });
+      };
+      lista('Cobros sin factura en la carpeta', F.sinFactura, function (x) { return fechaIsoCorta(x.pago) + ' · ' + x.d + ' (' + x.e + ') · ' + importe(x.monto) + (x.factura ? ' · cargada: ' + x.factura : ''); });
+      lista('Facturas sin cobro registrado en HONORARIOS', F.sinCobro, function (f) { return fechaIsoCorta(f.fecha) + ' · ' + f.numero + ' · ' + f.receptor + ' · neto ' + importe(f.neto); });
+      lista('Montos que no coinciden', F.diferencias, function (x) { return x.cobro.d + ' (' + x.cobro.e + '): HONORARIOS ' + importe(x.cobro.monto) + ' / factura neto ' + importe(x.factura.neto); });
+      if (F.ilegibles && F.ilegibles.length) lista('Facturas que no se pudieron leer', F.ilegibles, function (n) { return n; });
+      cont.appendChild(pf);
+    }
     if (m.enTexto.length) {
       var pt = h('div', { class: 'panel caja-aviso' }, h('b', { text: 'Para verificar: el seguimiento menciona ' + (m.enTexto.length === 1 ? 'un cobro' : m.enTexto.length + ' cobros') + ' de ' + m.nombre.toLowerCase() + ' sin FECHA DE PAGO en ese mes' }));
       m.enTexto.forEach(function (x) { pt.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit' }, fechaIsoCorta(x.fecha) + ' · ' + x.d + ' (' + x.e + '): ' + x.texto + ' ', linkHon(x.r, 'Abrir fila ↗'))); });

@@ -159,6 +159,18 @@ var Impresion = (function () {
       cuerpo.push(h('h2', { text: 'Para verificar: cobros mencionados en el seguimiento sin FECHA DE PAGO del mes' }));
       cuerpo.push(tabla([{ t: 'Fecha' }, { t: 'Demandado' }, { t: 'Expte.' }, { t: 'Movimiento' }], m.enTexto.map(function (x) { return [fIso(x.fecha), x.d, x.e, x.texto]; })));
     }
+    var F = m.facturas;
+    if (F && !F.error) {
+      cuerpo.push(h('h2', { text: 'Facturas emitidas en el mes (' + F.cantidad + ') · neto ' + pesos(F.neto) + ' · IVA ' + pesos(F.iva) + ' · total ' + pesos(F.total) }));
+      if (F.facturas.length) cuerpo.push(tabla([{ t: 'Fecha' }, { t: 'Factura' }, { t: 'Cliente' }, { t: 'Expte.' }, { t: 'Neto', num: true }, { t: 'IVA', num: true }, { t: 'Total', num: true }],
+        F.facturas.map(function (f) { return [fIso(f.fecha), f.tipo + ' ' + f.numero, f.receptor, (f.exptes || []).join(', '), pesos(f.neto), pesos(f.iva), pesos(f.total)]; })));
+      if (F.sinFactura.length) { cuerpo.push(h('h2', { text: 'Cobros sin factura en la carpeta (' + F.sinFactura.length + ')' }));
+        cuerpo.push(tabla([{ t: 'Fecha' }, { t: 'Demandado' }, { t: 'Expte.' }, { t: 'Monto', num: true }, { t: 'Factura cargada' }], F.sinFactura.map(function (x) { return [fIso(x.pago), x.d, x.e, pesos(x.monto), x.factura]; }))); }
+      if (F.sinCobro.length) { cuerpo.push(h('h2', { text: 'Facturas sin cobro registrado en HONORARIOS (' + F.sinCobro.length + ')' }));
+        cuerpo.push(tabla([{ t: 'Fecha' }, { t: 'Factura' }, { t: 'Cliente' }, { t: 'Neto', num: true }], F.sinCobro.map(function (f) { return [fIso(f.fecha), f.numero, f.receptor, pesos(f.neto)]; }))); }
+      if (F.diferencias.length) { cuerpo.push(h('h2', { text: 'Montos que no coinciden (' + F.diferencias.length + ')' }));
+        cuerpo.push(tabla([{ t: 'Demandado' }, { t: 'Expte.' }, { t: 'HONORARIOS', num: true }, { t: 'Factura' }, { t: 'Neto', num: true }], F.diferencias.map(function (x) { return [x.cobro.d, x.cobro.e, pesos(x.cobro.monto), x.factura.numero, pesos(x.factura.neto)]; }))); }
+    }
     imprimir({ tipo: 'cobros', marca: 'CONFIDENCIAL', titulo: 'HONORARIOS COBRADOS · ' + m.nombre + ' ' + m.anio, lineas: ['Del ' + fIso(m.desde) + ' al ' + fIso(m.hasta)], cuerpo: cuerpo });
   }
 
