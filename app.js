@@ -1016,11 +1016,10 @@
         'Semana pasada (' + fechaIsoCorta(d.semana.desde) + ' – ' + fechaIsoCorta(d.semana.hasta) + ')'),
       h('button', { type: 'button', class: hon.periodo === 'primer' ? 'activo' : '', onclick: function () { hon.periodo = 'primer'; pintarHonorarios(); } },
         'Agosto – octubre'));
-    var yaCobrados = per.lista.filter(function (x) { return x.pago || x.color === '#ffff00'; }).length;
-    cont.appendChild(h('div', { class: 'anio' }, 'Honorarios tramitados', h('small', { text: per.lista.length + ' juicios' + (yaCobrados ? ' · ' + yaCobrados + ' ya cobrados' : '') })));
+    cont.appendChild(h('div', { class: 'anio' }, 'Honorarios tramitados', h('small', { text: per.lista.length + ' juicios pendientes · los cobrados salen de la lista' })));
     seg.appendChild(h('button', { type: 'button', onclick: function () { Impresion.tramitados(per, hon.periodo === 'primer' ? 'Primer reporte (agosto – octubre)' : 'Semana anterior'); } }, '🖨 Imprimir'));
     cont.appendChild(seg);
-    if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay movimientos cargados en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
+    if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay juicios pendientes con movimientos en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
     per.lista.forEach(function (x) { cont.appendChild(tarjetaHon(x, x.movs)); });
 
     // Para revisar: cruce HONORARIOS × MAESTRO × SAE
