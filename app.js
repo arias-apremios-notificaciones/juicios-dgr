@@ -640,7 +640,7 @@
 
     // Estado del análisis
     var info = d.enCurso ? 'Analizando la cartera…' + (d.quedan ? ' quedan ' + d.quedan + ' juicios' : '')
-                         : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite cada 15 días' : 'Todavía no se analizó la cartera');
+                         : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite todos los domingos' : 'Todavía no se analizó la cartera');
     var btnAnalizar = h('button', { class: 'btn', type: 'button', disabled: d.enCurso }, d.enCurso ? 'Analizando…' : 'Analizar ahora');
     btnAnalizar.addEventListener('click', function () {
       btnAnalizar.disabled = true;
@@ -648,7 +648,7 @@
         .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
     });
     cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
-      h('div', null, h('h2', { text: 'Pedidos de sentencia (cada 15 días)' }), h('div', { class: 'ayuda chica', text: info })),
+      h('div', null, h('h2', { text: 'Pedidos de sentencia (todos los domingos)' }), h('div', { class: 'ayuda chica', text: info })),
       btnAnalizar),
       h('div', { class: 'ayuda chica', style: 'display:flex;gap:14px;flex-wrap:wrap' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }),
         d.porFirmar.length ? h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.paraFirmar(d.porFirmar); }, text: 'Imprimir lista para firmar' }) : null)));
