@@ -971,6 +971,7 @@
 
     // LISTADO DE LA SEMANA: todos los pendientes; salen solo cuando se cobran (29/10/2026)
     pintarListadoSemanal(cont, d);
+    cont.appendChild(panelEscritoHon());
 
     // Cobrado el mes anterior (reporte mensual)
     var m = d.mes;
@@ -1052,9 +1053,9 @@
   }
 
   function formDatosPago(dp) {
-    var campos = [['titular', 'Titular'], ['cuit', 'CUIT'], ['banco', 'Banco'], ['cbu', 'CBU / CVU (22 números)'], ['alias', 'Alias']];
+    var campos = [['titular', 'Titular'], ['cuit', 'CUIT'], ['banco', 'Banco'], ['cuenta', 'Cuenta (Ej.: Cte. Cte. en $ N° …)'], ['cbu', 'CBU / CVU (22 números)'], ['alias', 'Alias']];
     var inputs = {};
-    var f = h('form', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: 'Van en los mensajes de reclamo. Se guardan en tu Google (protegidos por el PIN).' }),
+    var f = h('form', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: 'Van en los mensajes de reclamo y en los pedidos de orden de pago. Se guardan en tu Google (protegidos por el PIN).' }),
       campos.map(function (c) { inputs[c[0]] = h('input', { class: 'campo-form', value: dp[c[0]] || '', placeholder: c[1], 'aria-label': c[1] }); return inputs[c[0]]; }),
       h('button', { class: 'btn primario', type: 'submit' }, 'Guardar datos'));
     f.addEventListener('submit', function (ev) {
@@ -1137,6 +1138,7 @@
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, x.plan ? 'cuota' : 'cobro', x, d); } }, x.plan ? 'Cobrar cuota' : 'Cobro'),
         x.plan ? null : h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'plan', x, d); } }, 'Cuotas'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'formulario', x, d); } }, 'Formulario RH'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'escrito', x, d); } }, 'Escrito'),
         linkHon(x.r, 'Fila ↗')),
       area);
     return card;
@@ -1227,7 +1229,126 @@
       });
     } else if (tipo === 'formulario') {
       formularioRH(area, x);
+    } else if (tipo === 'escrito') {
+      area.appendChild(formEscritoHon({ e: x.e, d: x.d, saldo: x.saldo != null ? x.saldo : x.monto }));
     }
+  }
+
+  // ───────── Escritos para cobrar honorarios (modelos sellados el 30/10/2026; EscritosHon.js) ─────────
+  var TIPOS_ESCRITO_HON = [['ORDEN_PAGO', 'Solicito orden de pago'], ['EMBARGO', 'Pido embargo ejecutorio por honorarios'],
+                           ['PLANILLA', 'Actualizo planilla por honorarios'], ['REGULACION', 'Solicito regulación de honorarios']];
+  function numeroAr(v) {
+    var t = String(v || '').replace(/[$\s]/g, '');
+    if (/,/.test(t)) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/\./g, '');
+    var n = Number(t);
+    return t && n > 0 ? n : null;
+  }
+  function campoHon(etiqueta, atributos) {
+    var i = h('input', Object.assign({ class: 'campo-form', 'aria-label': etiqueta }, atributos || {}));
+    return { input: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etiqueta }), i) };
+  }
+
+  /** @param j {e, d, saldo} el juicio */
+  function formEscritoHon(j) {
+    var f = h('form', { class: 'form-hon' });
+    var sel = h('select', { class: 'campo-form', 'aria-label': 'Tipo de escrito' }, TIPOS_ESCRITO_HON.map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
+    var campos = h('div', { class: 'form-hon-campos' }), resumen = h('div', { class: 'ayuda chica' }), resultado = h('div');
+    var boton = h('button', { class: 'btn primario', type: 'submit' }, 'Generar escrito');
+    var leer = function () { return {}; };
+    var clave = Buscador.exptesDe(j.e)[0], fila = estado.filas.filter(function (x) { return clave && Buscador.exptesDe(x.e)[0] === clave; })[0];
+    var dinero = function (e, valor) { return campoHon(e, { inputmode: 'decimal', value: valor ? montoATexto(valor) : '', placeholder: 'Ej.: 350.000 o 60.174,14' }); };
+    var fecha = function (e, valor) { return campoHon(e, { type: 'date', value: valor || '' }); };
+    function dibujar() {
+      campos.textContent = ''; resumen.textContent = ''; resultado.textContent = '';
+      var t = sel.value;
+      if (t === 'ORDEN_PAGO' || t === 'EMBARGO') {
+        var hon_ = dinero('Honorarios', j.saldo);
+        var cuentas = function () {
+          var n = numeroAr(hon_.input.value);
+          if (!n) { resumen.textContent = ''; return; }
+          var iva = Math.round(n * 21) / 100, ap = Math.round(n * 10) / 100;
+          resumen.textContent = 'IVA 21 %: $ ' + montoATexto(iva) + ' · Aportes 10 %: $ ' + montoATexto(ap) + ' · Total: $ ' + montoATexto(n + iva + ap);
+        };
+        hon_.input.addEventListener('input', cuentas);
+        campos.appendChild(hon_.nodo);
+        if (t === 'ORDEN_PAGO') {
+          var emb = dinero('Embargado a la orden del Juzgado');
+          campos.appendChild(emb.nodo);
+          campos.appendChild(h('div', { class: 'ayuda chica', text: 'La cuenta sale de "Datos para transferencia".' }));
+          leer = function () { return { honorarios: hon_.input.value, embargado: emb.input.value }; };
+        } else {
+          var base = h('select', { class: 'campo-form', 'aria-label': 'Qué se ejecuta' }, h('option', { value: 'REGULACION', text: 'Firme la regulación de honorarios' }), h('option', { value: 'PLANILLA', text: 'Firme la planilla de actualización' }));
+          var cuit = campoHon('CUIT del demandado', { inputmode: 'numeric', value: fila && fila.c ? String(fila.c).replace(/\D/g, '') : '' });
+          var banco = campoHon('Banco', { placeholder: 'Ej.: BANCO DE GALICIA Y BUENOS AIRES SAU' });
+          campos.appendChild(base); campos.appendChild(cuit.nodo); campos.appendChild(banco.nodo);
+          leer = function () { return { honorarios: hon_.input.value, base: base.value, cuit: cuit.input.value, banco: banco.input.value }; };
+        }
+        cuentas();
+      } else if (t === 'PLANILLA') {
+        var fo = fecha('Fecha del oficio de la orden de pago'), pa = dinero('Monto pagado'), fr = fecha('Fecha de la sentencia de regulación'),
+            ha = fecha('Actualizado hasta', hoyInput()), ba = dinero('Base de la actualización'), ac = dinero('Monto actualizado (de la planilla)');
+        var cu = h('input', { type: 'checkbox', 'aria-label': 'Fue un pago a cuenta' });
+        var calc = function () {
+          var a = numeroAr(ac.input.value), p = numeroAr(pa.input.value);
+          resumen.textContent = a && p ? (a > p ? 'Saldo adeudado: $ ' + montoATexto(a - p) : 'El monto actualizado tiene que ser mayor que lo pagado') : '';
+        };
+        ac.input.addEventListener('input', calc); pa.input.addEventListener('input', calc);
+        [fo, pa, h('label', { class: 'check-hon' }, cu, ' Fue un pago a cuenta'), fr, ha, ba, ac].forEach(function (c) { campos.appendChild(c.nodo || c); });
+        campos.appendChild(h('div', { class: 'ayuda chica', text: 'La planilla la sacás de la calculadora de tasa activa; acá cargás el resultado y después agregás el PDF.' }));
+        leer = function () { return { fechaOficio: isoADmy(fo.input.value), pagado: pa.input.value, aCuenta: cu.checked, fechaRegulacion: isoADmy(fr.input.value), hasta: isoADmy(ha.input.value), base: ba.input.value, actualizado: ac.input.value }; };
+      } else {
+        var va = h('select', { class: 'campo-form', 'aria-label': 'Variante' }, h('option', { value: 'SIN_CONTADORES', text: 'Sin intervención del Cuerpo de Contadores' }),
+          h('option', { value: 'CON_CONTADORES', text: 'Pido que se remita al Cuerpo de Contadores' }), h('option', { value: 'POST_CONTADORES', text: 'Después de la planilla del Cuerpo de Contadores' }));
+        campos.appendChild(va);
+        leer = function () { return { variante: va.value }; };
+      }
+    }
+    sel.addEventListener('change', dibujar);
+    function enviar(forzar) {
+      boton.disabled = true;
+      resultado.textContent = '';
+      resultado.appendChild(h('div', { class: 'ayuda chica', text: 'Generando el escrito…' }));
+      apiPost({ a: 'honEscrito', pin: hon.pin, tipo: sel.value, e: j.e, datos: leer(), forzar: !!forzar }).then(function (r) {
+        boton.disabled = false; resultado.textContent = '';
+        aviso('Escrito generado');
+        resultado.appendChild(h('div', { class: 'form-hon' }, h('b', { text: '✓ Escrito generado: quedó en Para firmar' }),
+          r.arca ? h('div', { class: 'ayuda chica', text: 'En menos de un minuto se le une la constancia de ARCA.' }) : null,
+          r.aviso ? h('div', { class: 'alerta', text: r.aviso }) : null,
+          h('div', { class: 'botones-hon' }, h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+            h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'))));
+      }).catch(function (e) {
+        boton.disabled = false; resultado.textContent = '';
+        resultado.appendChild(h('div', { class: 'alerta', text: traducirError(e) }));
+        if (/escrito igual/.test(String(e.message)) && confirm(String(e.message) + '\n\n¿Generar otro igual?')) enviar(true);
+      });
+    }
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (!confirm('¿Generar "' + sel.options[sel.selectedIndex].text + '" para ' + j.d + ' (' + j.e + ')?\n\nQueda en Para firmar; lo firmás y lo presentás vos.')) return;
+      enviar(false);
+    });
+    f.appendChild(sel); f.appendChild(campos); f.appendChild(resumen); f.appendChild(boton); f.appendChild(resultado);
+    dibujar();
+    return f;
+  }
+
+  /** Para un juicio que no está en el listado semanal (por ejemplo, un pedido de regulación). */
+  function panelEscritoHon() {
+    var caja = h('div'), lista = h('div', { class: 'man-lista' });
+    var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor', 'aria-label': 'Expediente o deudor' });
+    inp.addEventListener('input', function () {
+      lista.textContent = ''; caja.textContent = '';
+      var t = inp.value.trim();
+      if (!t) return;
+      Buscador.buscar(estado.indice, t, 5).forEach(function (r) {
+        var x = estado.filas[r.i];
+        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () {
+          inp.value = x.e; lista.textContent = ''; caja.textContent = '';
+          caja.appendChild(h('b', { text: x.d })); caja.appendChild(formEscritoHon({ e: x.e, d: x.d }));
+        } }, h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e + ' · ' + (x.g || '') })));
+      });
+    });
+    return h('details', { class: 'grupo' }, h('summary', { text: 'Escrito de honorarios para otro juicio' }), inp, lista, caja);
   }
 
   // ───────── Formulario del Registro de Honorarios (Res. 546): revisar todo, cargar el monto y generar ─────────
