@@ -1137,6 +1137,7 @@
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'reclamar', x, d); } }, 'Reclamar'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, x.plan ? 'cuota' : 'cobro', x, d); } }, x.plan ? 'Cobrar cuota' : 'Cobro'),
         x.plan ? null : h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'plan', x, d); } }, 'Cuotas'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'formulario', x, d); } }, 'Formulario RH'),
         linkHon(x.r, 'Fila ↗')),
       area);
     return card;
@@ -1225,8 +1226,116 @@
         escribirHon(Object.assign({ a: 'honPlanCuotas', cantidad: n.value, monto: mc.value, primera: isoADmy(pr.value) }, base),
           'Plan de ' + n.value + ' cuotas de ' + importe(Number(mc.value)) + ', 1ª el ' + isoADmy(pr.value) + ', para ' + x.d + ' (' + x.e + '). ¿Confirmás?', 'Plan guardado');
       });
+    } else if (tipo === 'formulario') {
+      formularioRH(area, x);
     }
   }
+
+  // ───────── Formulario del Registro de Honorarios (Res. 546): revisar todo, cargar el monto y generar ─────────
+  var CAMPOS_RH = [['juicio', 'Juicio', 2], ['expediente', 'Expediente', 1], ['juzgado', 'Juzgado o tribunal', 2],
+                   ['regulacion', 'Sentencia de regulación de honorarios', 7], ['documentos', 'Documentos que acreditan la satisfacción', 3],
+                   ['fondo', 'Sentencia de fondo', 8], ['observaciones', 'Observaciones', 7]];
+  var formRH = null;   // pedido en curso (para volver a preguntar al regresar a la app)
+
+  function formularioRH(area, x) {
+    area.appendChild(h('div', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: 'Buscando las sentencias en el SAE y el IVP en tu Gmail: puede tardar hasta un minuto…' })));
+    apiPost({ a: 'honFormDatos', pin: hon.pin, e: x.e, d: x.d }).then(function (r) {
+      if (area.dataset.tipo !== 'formulario') return;
+      area.textContent = '';
+      pintarFormularioRH(area, r);
+    }).catch(function (e) {
+      if (area.dataset.tipo !== 'formulario') return;
+      area.textContent = '';
+      area.appendChild(h('div', { class: 'form-hon' }, h('div', { class: 'alerta', text: 'No se pudo: ' + traducirError(e) })));
+    });
+  }
+
+  function montoATexto(n) {
+    var v = Math.round(n * 100) / 100, ent = Math.floor(v), dec = Math.round((v - ent) * 100);
+    return String(ent).replace(/\B(?=(\d{3})+(?!\d))/g, '.') + (dec ? ',' + ('0' + dec).slice(-2) : '');
+  }
+
+  function pintarFormularioRH(area, r) {
+    var cajas = {};
+    var monto = h('input', { class: 'campo-form', inputmode: 'decimal', placeholder: 'Ej.: 819.272 o 2.444.283,30', 'aria-label': 'Monto a percibir' });
+    var valorMonto = function () {
+      var t = monto.value.trim().replace(/[$\s]/g, '');
+      if (/,/.test(t)) t = t.replace(/\./g, '').replace(',', '.'); else t = t.replace(/\./g, '');
+      var n = Number(t);
+      return t && n > 0 ? n : null;
+    };
+    var campos = CAMPOS_RH.map(function (c) {
+      var caja = cajas[c[0]] = h(c[2] > 1 ? 'textarea' : 'input', { class: 'campo-form', 'aria-label': c[1] });
+      if (c[2] > 1) caja.rows = c[2];
+      caja.value = r.campos[c[0]] || '';
+      return h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: c[1] }), caja);
+    });
+    monto.addEventListener('input', function () {
+      var n = valorMonto();
+      cajas.observaciones.value = cajas.observaciones.value.replace(/(asciende a \$ )(\[MONTO\]|[\d.,]*)/, '$1' + (n ? montoATexto(n) : '[MONTO]'));
+    });
+    var resultado = h('div');
+    var boton = h('button', { class: 'btn primario', type: 'submit' }, 'Generar formulario con firma y sello');
+    var f = h('form', { class: 'form-hon' },
+      r.avisos.map(function (t) { return h('div', { class: 'alerta', text: t }); }),
+      (r.existentes || []).length ? h('div', { class: 'alerta' }, 'Este expediente ya tiene formulario: ',
+        r.existentes.map(function (y) { return h('a', { href: y.url, target: '_blank', rel: 'noopener', text: y.nombre + ' ' }); })) : null,
+      h('div', { class: 'alerta', text: 'Compará los textos con la sentencia: el SAE a veces pierde palabras al cambiar de página. El formulario es una declaración jurada y sale con tu firma.' }),
+      h('label', { class: 'etiqueta', text: 'Monto a percibir (lo cargás siempre vos)' }), monto,
+      r.montoRegulado != null ? h('div', { class: 'ayuda chica', text: 'Regulado en la sentencia: ' + importe(r.montoRegulado) + ' (solo como referencia)' }) : null,
+      r.ivp.url ? h('div', { class: 'ayuda chica' }, 'IVP N° I ' + r.ivp.nro + ' del ' + r.ivp.fecha + ' · ', h('a', { href: r.ivp.url, target: '_blank', rel: 'noopener', text: 'Ver IVP ↗' })) : null,
+      campos, boton, resultado);
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var n = valorMonto();
+      if (!n) { aviso('Cargá el monto a percibir'); monto.focus(); return; }
+      var datos = {};
+      CAMPOS_RH.forEach(function (c) { datos[c[0]] = cajas[c[0]].value.trim(); });
+      if (/\[(MONTO|NRO DE IVP|FECHA|ESTADO)\]/.test(datos.observaciones + datos.documentos)) { aviso('Completá lo que está entre corchetes en Observaciones y Documentos'); return; }
+      var vacio = CAMPOS_RH.filter(function (c) { return !datos[c[0]]; })[0];
+      if (vacio) { aviso('Falta completar: ' + vacio[1]); cajas[vacio[0]].focus(); return; }
+      if (!confirm('¿Generar el formulario de ' + r.d + ' (' + r.e + ') con tu firma y sello?\n\nMonto a percibir: $ ' + montoATexto(n) + '\n\nQueda guardado en el Drive; lo presentás vos.')) return;
+      boton.disabled = true;
+      resultado.textContent = '';
+      resultado.appendChild(h('div', { class: 'ayuda chica', text: 'Armando el PDF: 1 o 2 minutos. Podés seguir usando la app.' }));
+      apiPost({ a: 'honFormPedir', pin: hon.pin, e: r.e, d: r.d, campos: datos, ivpPdf: r.ivp.pdf }).then(function (p) {
+        formRH = { job: p.job, resultado: resultado, boton: boton, timer: null };
+        seguirFormRH();
+      }).catch(function (e) { boton.disabled = false; resultado.textContent = ''; resultado.appendChild(h('div', { class: 'alerta', text: 'No se pudo: ' + traducirError(e) })); });
+    });
+    area.appendChild(f);
+    // Que los textos largos se lean enteros, sin barra de desplazamiento.
+    var ajustar = function (t) { t.style.height = 'auto'; t.style.height = (t.scrollHeight + 2) + 'px'; };
+    Object.keys(cajas).forEach(function (k) {
+      if (cajas[k].tagName !== 'TEXTAREA') return;
+      ajustar(cajas[k]);
+      cajas[k].addEventListener('input', function () { ajustar(cajas[k]); });
+    });
+  }
+
+  function seguirFormRH(ya) {
+    var F = formRH;
+    if (!F || !hon.pin) return;
+    clearTimeout(F.timer);
+    F.timer = setTimeout(function () {
+      apiPost({ a: 'honFormEstado', pin: hon.pin, j: F.job }).then(function (r) {
+        if (formRH !== F) return;
+        if (r.estado === 'EN_COLA') { seguirFormRH(); return; }
+        formRH = null;
+        F.boton.disabled = false;
+        F.resultado.textContent = '';
+        if (r.estado === 'ERROR') { F.resultado.appendChild(h('div', { class: 'alerta', text: r.error })); return; }
+        aviso('Formulario listo');
+        F.resultado.appendChild(h('div', { class: 'form-hon' },
+          h('b', { text: '✓ ' + r.nombre }),
+          h('div', { class: 'botones-hon' },
+            h('a', { class: 'btn primario', href: r.url, target: '_blank', rel: 'noopener' }, 'Abrir formulario'),
+            h('a', { class: 'btn', href: r.carpeta, target: '_blank', rel: 'noopener' }, 'Abrir carpeta')),
+          h('div', { class: 'ayuda chica', text: (r.ivpCopiado ? 'El IVP ya está en la carpeta. ' : 'Agregá el PDF del IVP a la carpeta. ') + 'Falta el PDF de la sentencia: el SAE solo entrega el texto, así que hay que bajarlo del portal y guardarlo ahí.' })));
+      }).catch(function () { seguirFormRH(); });
+    }, ya ? 0 : 5000);
+  }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) seguirFormRH(true); });
 
   function tarjetaHon(x, movs) {
     var dias = x.ult ? diasDesdeIso(x.ult.fecha) : null;
