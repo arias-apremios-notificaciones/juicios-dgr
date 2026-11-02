@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -250,7 +250,8 @@
         btnImp.disabled = false; btnImp.lastChild.textContent = 'SAE sin respuesta: imprimir sin movimientos';
       });
     });
-    det.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 8px' }, btnImp));
+    det.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 8px' }, btnImp,
+      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoAgenda({ e: f.e, d: f.d }); } }, 'Agendar')));
 
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
@@ -577,12 +578,17 @@
     $('firmar').hidden = v !== 'firmar';
     $('escritos').hidden = v !== 'escritos';
     $('honorarios').hidden = v !== 'honorarios';
+    $('agenda').hidden = v !== 'agenda';
     actualizarBarraAcciones();
+    actualizarAlertasAgenda();
     if (v === 'firmar') cargarFirmar();
     else if (v === 'escritos') pintarEscritos();
     else if (v === 'honorarios') cargarHonorarios();
+    else if (v === 'agenda') { pintarAgenda(); cargarAgenda(); }
     else render();
     window.scrollTo(0, 0);
+    var pest = document.querySelector('.pestana.activa');
+    if (pest && pest.scrollIntoView) pest.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   }
 
   function verJuicio(expte) {
@@ -1502,6 +1508,204 @@
     return m;
   }
 
+  // ───────── Agenda de plazos (las reglas están en agenda.js) ─────────
+  var agenda = { datos: null, form: null, lugar: 'TODOS', verHechos: false, error: '' };
+
+  function inhabilesAgenda() {
+    var m = {};
+    ((agenda.datos && agenda.datos.inhabiles) || []).forEach(function (k) { m[k] = true; });
+    return m;
+  }
+
+  function actualizarAlertasAgenda() {
+    var a = Agenda.alertas((agenda.datos && agenda.datos.items) || [], hoyInput());
+    var c = $('cuenta-agenda'), b = $('aviso-agenda');
+    c.textContent = String(a.total);
+    c.hidden = !a.total;
+    b.textContent = '⚠ Agenda: ' + Agenda.textoAlertas(a);
+    b.classList.toggle('grave', !!(a.vencidos || a.hoy));
+    b.hidden = !a.total || estado.vista === 'agenda';
+  }
+
+  function recibirAgenda(d) {
+    agenda.datos = d;
+    agenda.error = '';
+    guardar(LS.agenda, d);
+    actualizarAlertasAgenda();
+  }
+
+  function cargarAgenda() {
+    if (!estado.cfg) return Promise.resolve();
+    return api({ a: 'agenda' }).then(function (d) {
+      if (!d.items) throw new Error('El servidor (Apps Script) todavía no tiene la Agenda: falta pegar el código nuevo y crear una "Nueva versión".');
+      recibirAgenda(d);
+    }).catch(function (e) { agenda.error = traducirError(e); }).then(function () {
+      if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();      // no le borra lo que está escribiendo
+    });
+  }
+
+  function nuevoAgenda(datos) {
+    agenda.form = Object.assign({ tipo: 'VENCIMIENTO', titulo: '', e: '', d: '', fecha: '', hora: '', fatal: false, lugar: 'DESPACHO', frecuencia: 'MENSUAL', notas: '' }, datos || {});
+    if (estado.vista === 'agenda') pintarAgenda(); else cambiarVista('agenda');
+  }
+
+  function marcarAgenda(it, accion, texto) {
+    apiPost({ a: 'agendaMarcar', id: it.id, accion: accion }).then(function (d) {
+      recibirAgenda(d);
+      pintarAgenda();
+      aviso(texto);
+    }).catch(function (e) { aviso(traducirError(e)); });
+  }
+
+  function tarjetaAgenda(it, hoy, inh) {
+    var n = Agenda.nivel(it, hoy), hecho = n === 'hecho';
+    return h('div', { class: 'item-agenda nivel-' + n },
+      h('div', { class: 'agenda-chips' },
+        it.fatal ? h('span', { class: 'chip-fatal', text: 'PLAZO FATAL' }) : null,
+        it.lugar ? h('span', { class: 'chip-tipo', text: Agenda.LUGARES[it.lugar] }) : null),
+      h('div', { class: 'agenda-titulo', text: it.titulo }),
+      h('div', { class: 'agenda-cuando', text: Agenda.texto(it, hoy, inh) }),
+      it.e ? h('button', { class: 'agenda-expte', type: 'button', onclick: function () { verJuicio(it.e); } }, 'Expte. ' + it.e + (it.d ? ' · ' + it.d : '') + ' ›') : null,
+      it.notas ? h('div', { class: 'ayuda chica agenda-notas', text: it.notas }) : null,
+      h('div', { class: 'botones-hon' },
+        hecho ? h('button', { class: 'btn', type: 'button', onclick: function () { marcarAgenda(it, 'REABRIR', 'Volvió a quedar pendiente'); } }, 'Deshacer')
+              : h('button', { class: 'btn primario', type: 'button', onclick: function () { marcarAgenda(it, 'HECHO', 'Marcado como cumplido'); } }, 'Cumplido'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { nuevoAgenda(it); window.scrollTo(0, 0); } }, 'Editar'),
+        h('button', { class: 'btn', type: 'button', onclick: function () {
+          if (confirm('¿Borrar "' + it.titulo + '" de la agenda?')) marcarAgenda(it, 'BORRAR', 'Borrado de la agenda');
+        } }, 'Borrar')));
+  }
+
+  function formAgenda(inh) {
+    var f = agenda.form, campos = h('div', { class: 'form-hon-campos' }), error = h('p', { class: 'error', hidden: true });
+    var tipo = h('select', { class: 'campo-form', 'aria-label': 'Qué vas a cargar' }, Object.keys(Agenda.TIPOS).map(function (k) {
+      return h('option', { value: k, text: Agenda.TIPOS[k], selected: k === f.tipo });
+    }));
+    tipo.addEventListener('change', function () { f.tipo = tipo.value; pintarAgenda(); });
+    var campo = function (etiqueta, nodo) { return h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etiqueta }), nodo); };
+    var enlazar = function (input, clave) { input.addEventListener('input', function () { f[clave] = input.value; }); return input; };
+
+    campos.appendChild(campo('Qué', enlazar(h('input', { class: 'campo-form', value: f.titulo, maxlength: '300', placeholder: f.tipo === 'RECURRENTE' ? 'Ej.: Subir la constancia de ARCA' : 'Ej.: Contestar traslado' }), 'titulo')));
+
+    if (f.tipo === 'VENCIMIENTO' || f.tipo === 'AUDIENCIA') {
+      var fecha = enlazar(h('input', { class: 'campo-form', type: 'date', value: f.fecha }), 'fecha');
+      campos.appendChild(campo('Fecha', fecha));
+    }
+    if (f.tipo === 'VENCIMIENTO') {
+      var fatal = h('input', { type: 'checkbox', checked: f.fatal });
+      fatal.addEventListener('change', function () { f.fatal = fatal.checked; });
+      campos.appendChild(h('label', { class: 'check-hon' }, fatal, ' Plazo fatal (avisa todos los días desde 7 días antes)'));
+      // Contar días hábiles con el calendario judicial de la planilla.
+      var desde = h('input', { class: 'campo-form', type: 'date', value: hoyInput() }), cuantos = h('input', { class: 'campo-form', type: 'number', min: '1', max: '365', inputmode: 'numeric', placeholder: 'Ej.: 5' });
+      var resultado = h('div', { class: 'ayuda chica' });
+      campos.appendChild(h('details', { class: 'agenda-contar' }, h('summary', { text: 'Contar días hábiles' }),
+        h('div', { class: 'form-hon-campos' }, campo('Desde (notificación)', desde), campo('Días hábiles', cuantos),
+          h('button', { class: 'btn', type: 'button', onclick: function () {
+            var n = parseInt(cuantos.value, 10);
+            if (!Agenda.fechaValida(desde.value) || !(n >= 1 && n <= 365)) { resultado.textContent = 'Completá la fecha y los días.'; return; }
+            f.fecha = Agenda.sumarHabiles(desde.value, n, inh);
+            fecha.value = f.fecha;
+            resultado.textContent = 'Se cumple el ' + Agenda.dmy(f.fecha) + '. Quedó cargado en Fecha.';
+          } }, 'Calcular'), resultado,
+          h('div', { class: 'ayuda chica', text: 'Cuenta desde el día siguiente y saltea fines de semana, feriados y ferias de la pestaña CALENDARIO. Controlá el resultado antes de guardar.' }))));
+    }
+    if (f.tipo === 'AUDIENCIA') campos.appendChild(campo('Hora', enlazar(h('input', { class: 'campo-form', type: 'time', value: f.hora }), 'hora')));
+    if (f.tipo === 'TAREA') {
+      campos.appendChild(campo('Dónde se hace', enlazar(h('select', { class: 'campo-form' }, Object.keys(Agenda.LUGARES).map(function (k) {
+        return h('option', { value: k, text: Agenda.LUGARES[k], selected: k === f.lugar });
+      })), 'lugar')));
+    }
+    if (f.tipo === 'RECURRENTE') {
+      campos.appendChild(campo('Cada cuánto', enlazar(h('select', { class: 'campo-form' }, Object.keys(Agenda.FRECUENCIAS).map(function (k) {
+        return h('option', { value: k, text: Agenda.FRECUENCIAS[k], selected: k === f.frecuencia });
+      })), 'frecuencia')));
+    }
+
+    // Juicio relacionado (optativo)
+    var cajaJuicio = h('div', { class: 'form-hon-campos' });
+    var pintarJuicio = function () {
+      cajaJuicio.textContent = '';
+      if (f.e) {
+        cajaJuicio.appendChild(h('div', { class: 'agenda-juicio' }, h('span', { text: 'Expte. ' + f.e + (f.d ? ' · ' + f.d : '') }),
+          h('button', { class: 'btn', type: 'button', onclick: function () { f.e = ''; f.d = ''; pintarJuicio(); } }, 'Quitar')));
+        return;
+      }
+      var lista = h('div', { class: 'man-lista' });
+      var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor', 'aria-label': 'Juicio relacionado' });
+      inp.addEventListener('input', function () {
+        lista.textContent = '';
+        var t = inp.value.trim();
+        if (!t) return;
+        Buscador.buscar(estado.indice, t, 5).forEach(function (r) {
+          var x = estado.filas[r.i];
+          lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { f.e = x.e; f.d = x.d; pintarJuicio(); } },
+            h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e })));
+        });
+      });
+      cajaJuicio.appendChild(inp);
+      cajaJuicio.appendChild(lista);
+    };
+    pintarJuicio();
+    campos.appendChild(campo('Juicio (optativo)', cajaJuicio));
+    campos.appendChild(campo('Notas (optativo)', enlazar(h('textarea', { class: 'campo-form', rows: '2', maxlength: '1000' }, f.notas), 'notas')));
+
+    var guardarBtn = h('button', { class: 'btn primario', type: 'submit' }, f.id ? 'Guardar cambios' : 'Agregar a la agenda');
+    var form = h('form', { class: 'panel form-hon form-agenda' }, h('h2', { text: f.id ? 'Editar' : 'Agregar' }), campo('Qué vas a cargar', tipo), campos, error,
+      h('div', { class: 'botones-hon' }, guardarBtn, h('button', { class: 'btn', type: 'button', onclick: function () { agenda.form = null; pintarAgenda(); } }, 'Cancelar')));
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      error.hidden = true;
+      var v = Agenda.validar(f, inh);
+      if (!v.ok) { error.textContent = v.error; error.hidden = false; return; }
+      guardarBtn.disabled = true;
+      apiPost({ a: 'agendaGuardar', item: f }).then(function (d) {
+        agenda.form = null;
+        recibirAgenda(d);
+        pintarAgenda();
+        aviso(d.aviso || 'Guardado en la agenda');
+      }).catch(function (e) {
+        guardarBtn.disabled = false;
+        error.textContent = traducirError(e);
+        error.hidden = false;
+      });
+    });
+    return form;
+  }
+
+  function seccionAgenda(titulo, items, hoy, inh, vacio, extra) {
+    return h('section', { class: 'seccion-agenda' }, h('h2', { text: titulo + (items.length ? ' (' + items.length + ')' : '') }), extra || null,
+      items.length ? items.map(function (it) { return tarjetaAgenda(it, hoy, inh); }) : h('p', { class: 'ayuda chica', text: vacio }));
+  }
+
+  function pintarAgenda() {
+    var cont = $('agenda');
+    cont.textContent = '';
+    if (!estado.cfg) { cont.appendChild(h('p', { class: 'ayuda', text: 'Configurá la app primero (engranaje).' })); return; }
+    if (agenda.error) cont.appendChild(h('div', { class: 'alerta', text: agenda.error + (agenda.datos ? ' Lo que ves es la última copia guardada.' : '') }));
+    if (!agenda.datos) { if (!agenda.error) cont.appendChild(h('p', { class: 'ayuda', text: 'Cargando la agenda…' })); return; }
+
+    var hoy = hoyInput(), inh = inhabilesAgenda(), s = Agenda.secciones(agenda.datos.items, hoy);
+    if (agenda.form) cont.appendChild(formAgenda(inh));
+    else cont.appendChild(h('div', { class: 'botones', style: 'margin-bottom:12px' }, h('button', { class: 'btn primario', type: 'button', onclick: function () { nuevoAgenda(); } }, '+ Agregar')));
+
+    cont.appendChild(seccionAgenda('Vencimientos', s.vencimientos, hoy, inh, 'No hay vencimientos cargados.'));
+    cont.appendChild(seccionAgenda('Audiencias y reuniones', s.audiencias, hoy, inh, 'No hay audiencias cargadas.'));
+
+    var lugares = {};
+    s.tareas.forEach(function (t) { lugares[t.lugar] = true; });
+    var filtro = Object.keys(lugares).length > 1 ? h('div', { class: 'seg agenda-filtro' }, ['TODOS'].concat(Object.keys(lugares)).map(function (k) {
+      return h('button', { type: 'button', class: agenda.lugar === k ? 'activo' : '', onclick: function () { agenda.lugar = k; pintarAgenda(); } }, k === 'TODOS' ? 'Todas' : Agenda.LUGARES[k]);
+    })) : null;
+    var tareas = s.tareas.filter(function (t) { return !filtro || agenda.lugar === 'TODOS' || t.lugar === agenda.lugar; });
+    cont.appendChild(seccionAgenda('Tareas', tareas, hoy, inh, 'No hay tareas pendientes.', filtro));
+    cont.appendChild(seccionAgenda('Tareas que se repiten', s.recurrentes, hoy, inh, 'Sirven para lo que hacés cada día, semana o mes. Al empezar el período vuelven solas a pendientes.'));
+
+    if (s.hechos.length) {
+      cont.appendChild(h('button', { class: 'btn', type: 'button', onclick: function () { agenda.verHechos = !agenda.verHechos; pintarAgenda(); } }, (agenda.verHechos ? 'Ocultar' : 'Ver') + ' cumplidos (' + s.hechos.length + ')'));
+      if (agenda.verHechos) cont.appendChild(seccionAgenda('Cumplidos', s.hechos, hoy, inh, ''));
+    }
+  }
+
   function pintarEscritos() {
     var cont = $('escritos');
     cont.textContent = '';
@@ -1719,6 +1923,10 @@
     iniciarVoz();
     estado.vista = 'buscar';
     document.querySelectorAll('.pestana').forEach(function (b) { b.addEventListener('click', function () { cambiarVista(b.dataset.vista); }); });
+    $('aviso-agenda').addEventListener('click', function () { cambiarVista('agenda'); });
+    agenda.datos = leer(LS.agenda);
+    actualizarAlertasAgenda();
+    cargarAgenda();
     $('btn-presentados').addEventListener('click', marcarPresentados);
     $('btn-imprimir-lote').addEventListener('click', imprimirLote);
     $('doc-imprimir').addEventListener('click', function () { if (estado.doc) Impresion.documentoSae(estado.doc.titulo, estado.doc.texto, estado.doc.f); });
@@ -1735,7 +1943,7 @@
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });
     $('btn-limpiar').addEventListener('click', function () { q.value = ''; render(); q.focus(); });
     $('estado-sync').addEventListener('click', function () { refrescar(true); });
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) refrescar(false); });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { refrescar(false); actualizarAlertasAgenda(); cargarAgenda(); } });
     window.addEventListener('online', function () { refrescar(true); });
 
     render();
