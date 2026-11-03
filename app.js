@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo', agendaGrupo: 'jdgr.agendaGrupo' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -531,7 +531,7 @@
   }
 
   // ───────── Para firmar (motor de escritos) ─────────
-  var firmar = { datos: null, sel: {}, cargando: false, lote: null, grupo: leer(LS.firmarGrupo) };
+  var firmar = { datos: null, sel: {}, cargando: false, lote: null, grupo: null };   // grupo: tarjeta abierta (null = las tarjetas)
 
   // Una tarjeta por tipo de escrito; al tocarla se abren sus escritos (como los botones del portal del SAE).
   var GRUPOS_FIRMAR = [
@@ -554,12 +554,20 @@
     return b;
   }
 
+  // Una tarjeta abierta ocupa toda la pestaña: arriba "← Tarjetas" y el nombre; abajo, "← Volver a las tarjetas".
+  function cabeceraGrupo(nombre, volver) {
+    return h('div', { class: 'cabecera-grupo' }, h('button', { class: 'btn', type: 'button', onclick: volver }, '← Tarjetas'), h('h2', { text: nombre }));
+  }
+  function pieGrupo(volver) {
+    return h('div', { class: 'pie-grupo' }, h('button', { class: 'btn', type: 'button', onclick: volver }, '← Volver a las tarjetas'));
+  }
+
   // Al cambiar de tarjeta se destilda todo: así nunca se marca como presentado un escrito que no está a la vista.
   function abrirGrupoFirmar(id) {
     firmar.grupo = id;
-    guardar(LS.firmarGrupo, id);
     firmar.sel = {};
     pintarFirmar();
+    window.scrollTo(0, 0);
   }
 
   function imprimirLote() {
@@ -690,6 +698,16 @@
     GRUPOS_FIRMAR.forEach(function (g) { grupos[g.id] = []; });
     d.porFirmar.forEach(function (x) { grupos[grupoFirmar(x)].push(x); });
     var abierto = firmar.grupo && (firmar.grupo !== 'otros' || grupos.otros.length) ? firmar.grupo : null;
+    if (abierto) {
+      var volver = function () { abrirGrupoFirmar(null); };
+      cont.appendChild(cabeceraGrupo(GRUPOS_FIRMAR.filter(function (g) { return g.id === abierto; })[0].nombre, volver));
+      if (abierto === 'sentencia') seccionSentencia(cont, d, grupos.sentencia);
+      else if (abierto === 'ivp') seccionIvp(cont, d, grupos.ivp);
+      else seccionOtrosFirmar(cont, d, grupos.otros);
+      cont.appendChild(pieGrupo(volver));
+      actualizarBarraAcciones();
+      return;
+    }
     var cuando = function (iso) { return new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }); };
     var info = {
       sentencia: d.enCurso ? 'Analizando…' : d.ultimaCorrida ? 'Análisis del ' + cuando(d.ultimaCorrida) : 'Sin analizar',
@@ -701,18 +719,13 @@
       if (g.id === 'otros' && !grupos.otros.length) return;
       var sinArca = g.id === 'sentencia' && d.arca && !d.arca.alDia;
       tarjetas.appendChild(tarjetaGrupo({
-        nombre: g.nombre, numero: grupos[g.id].length, unidad: 'para firmar', abierta: abierto === g.id,
+        nombre: g.nombre, numero: grupos[g.id].length, unidad: 'para firmar', entrar: true,
         info: [info[g.id], g.id === 'sentencia' && !sinArca && d.revision.length ? d.revision.length + ' en revisión manual' : ''],
         alerta: sinArca ? '⚠ Falta la constancia de ARCA' : '',
-        onclick: function () { abrirGrupoFirmar(abierto === g.id ? null : g.id); }
+        onclick: function () { abrirGrupoFirmar(g.id); }
       }));
     });
     cont.appendChild(tarjetas);
-
-    if (abierto === 'sentencia') seccionSentencia(cont, d, grupos.sentencia);
-    else if (abierto === 'ivp') seccionIvp(cont, d, grupos.ivp);
-    else if (abierto === 'otros') seccionOtrosFirmar(cont, d, grupos.otros);
-    else cont.appendChild(h('p', { class: 'ayuda chica', style: 'text-align:center', text: 'Tocá una tarjeta para ver sus escritos.' }));
     actualizarBarraAcciones();
   }
 
@@ -1044,15 +1057,13 @@
     var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
     var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar' };
     if (hon.grupo && nombres[hon.grupo]) {
-      cont.appendChild(h('div', { class: 'cabecera-grupo' },
-        h('button', { class: 'btn', type: 'button', onclick: function () { abrirGrupoHon(null); } }, '← Tarjetas'),
-        h('h2', { text: nombres[hon.grupo] })));
+      cont.appendChild(cabeceraGrupo(nombres[hon.grupo], function () { abrirGrupoHon(null); }));
       if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
       else if (hon.grupo === 'escritos') { cont.appendChild(panelEscritoHon()); cont.appendChild(h('div', { id: 'hon-generados' })); refrescarGenerados(); }
       else if (hon.grupo === 'cobrado') pintarCobradoMes(cont, m);
       else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
       else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
-      cont.appendChild(h('div', { class: 'pie-grupo' }, h('button', { class: 'btn', type: 'button', onclick: function () { abrirGrupoHon(null); } }, '← Volver a las tarjetas')));
+      cont.appendChild(pieGrupo(function () { abrirGrupoHon(null); }));
       return;
     }
 
@@ -1731,7 +1742,7 @@
   }
 
   // ───────── Agenda de plazos (las reglas están en agenda.js) ─────────
-  var agenda = { datos: null, form: null, lugar: 'TODOS', verHechos: false, error: '', grupo: leer(LS.agendaGrupo) || 'vencimientos' };
+  var agenda = { datos: null, form: null, lugar: 'TODOS', verHechos: false, error: '', grupo: null };   // grupo: tarjeta abierta (null = las tarjetas)
 
   // Una tarjeta por sección, igual que en Para firmar.
   var GRUPOS_AGENDA = [
@@ -1742,8 +1753,8 @@
   ];
   function abrirGrupoAgenda(id) {
     agenda.grupo = id;
-    guardar(LS.agendaGrupo, id);
     pintarAgenda();
+    window.scrollTo(0, 0);
   }
 
   function inhabilesAgenda() {
@@ -1896,7 +1907,6 @@
       apiPost({ a: 'agendaGuardar', item: f }).then(function (d) {
         agenda.form = null;
         agenda.grupo = GRUPOS_AGENDA.filter(function (g) { return g.tipo === f.tipo; })[0].id;   // abre la tarjeta de lo que se guardó
-        guardar(LS.agendaGrupo, agenda.grupo);
         recibirAgenda(d);
         pintarAgenda();
         aviso(d.aviso || 'Guardado en la agenda');
@@ -1938,18 +1948,19 @@
     if (!agenda.datos) { if (!agenda.error) cont.appendChild(h('p', { class: 'ayuda', text: 'Cargando la agenda…' })); return; }
 
     var hoy = hoyInput(), inh = inhabilesAgenda(), s = Agenda.secciones(agenda.datos.items, hoy);
+    var abierto = GRUPOS_AGENDA.filter(function (g) { return g.id === agenda.grupo; })[0];
+    var volver = function () { abrirGrupoAgenda(null); };
+    if (abierto) cont.appendChild(cabeceraGrupo(abierto.nombre, volver));
     if (agenda.form) cont.appendChild(formAgenda(inh));
     else cont.appendChild(h('div', { class: 'botones', style: 'margin-bottom:12px' }, h('button', { class: 'btn primario', type: 'button', onclick: function () { nuevoAgenda(); } }, '+ Agregar')));
 
-    var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
-    GRUPOS_AGENDA.forEach(function (g) {
-      tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: g.nombre, abierta: agenda.grupo === g.id,
-        onclick: function () { abrirGrupoAgenda(agenda.grupo === g.id ? null : g.id); } }, resumenGrupoAgenda(g, s[g.id], hoy))));
-    });
-    cont.appendChild(tarjetas);
-
-    var abierto = GRUPOS_AGENDA.filter(function (g) { return g.id === agenda.grupo; })[0];
-    if (abierto && abierto.id === 'tareas') {
+    if (!abierto) {
+      var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
+      GRUPOS_AGENDA.forEach(function (g) {
+        tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: g.nombre, entrar: true, onclick: function () { abrirGrupoAgenda(g.id); } }, resumenGrupoAgenda(g, s[g.id], hoy))));
+      });
+      cont.appendChild(tarjetas);
+    } else if (abierto.id === 'tareas') {
       var lugares = {};
       s.tareas.forEach(function (t) { lugares[t.lugar] = true; });
       var filtro = Object.keys(lugares).length > 1 ? h('div', { class: 'seg agenda-filtro' }, ['TODOS'].concat(Object.keys(lugares)).map(function (k) {
@@ -1957,8 +1968,8 @@
       })) : null;
       var tareas = s.tareas.filter(function (t) { return !filtro || agenda.lugar === 'TODOS' || t.lugar === agenda.lugar; });
       cont.appendChild(seccionAgenda('', tareas, hoy, inh, abierto.vacio, filtro));
-    } else if (abierto) cont.appendChild(seccionAgenda('', s[abierto.id], hoy, inh, abierto.vacio));
-    else cont.appendChild(h('p', { class: 'ayuda chica', style: 'text-align:center', text: 'Tocá una tarjeta para ver lo cargado.' }));
+    } else cont.appendChild(seccionAgenda('', s[abierto.id], hoy, inh, abierto.vacio));
+    if (abierto) { cont.appendChild(pieGrupo(volver)); return; }
 
     if (s.hechos.length) {
       cont.appendChild(h('button', { class: 'btn', type: 'button', onclick: function () { agenda.verHechos = !agenda.verHechos; pintarAgenda(); } }, (agenda.verHechos ? 'Ocultar' : 'Ver') + ' cumplidos (' + s.hechos.length + ')'));

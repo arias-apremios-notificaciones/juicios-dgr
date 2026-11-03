@@ -448,7 +448,7 @@ details.grupo[open] > summary::before { content: "▾ "; }
   .pestana { flex: 1 0 auto; padding: 9px 8px; font-size: 14px; white-space: nowrap; }
 }
 
-/* Honorarios: una tarjeta abierta ocupa toda la pestaña */
+/* Para firmar, Agenda y Honorarios: una tarjeta abierta ocupa toda la pestaña */
 .cabecera-grupo { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; }
 .cabecera-grupo h2 { margin: 0; font-size: 21px; font-weight: 800; color: var(--enfasis); hyphens: auto; }
 .pie-grupo { margin: 16px 0 6px; text-align: center; }
