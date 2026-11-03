@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmar: 'jdgr.firmar', cola: 'jdgr.cola' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmar: 'jdgr.firmar', cola: 'jdgr.cola', drive: 'jdgr.subirDrive' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -1955,6 +1955,53 @@
     b.textContent = '⚠ Agenda: ' + Agenda.textoAlertas(a);
     b.classList.toggle('grave', !!(a.vencidos || a.hoy));
     b.hidden = !a.total || estado.vista === 'agenda';
+    avisoSubirDrive();
+  }
+
+  // ───────── Recordatorio semanal: subir al Drive lo guardado en la PC del trabajo (ahí no se puede sincronizar el Drive) ─────────
+  // Es una tarea de la Agenda que se repite todas las semanas: "Ya lo subí" la marca cumplida y queda igual en la PC y en el teléfono.
+  var SUBIR_DRIVE = { id: 'subir-drive', desdeDia: 4,   // días después del lunes: 4 = viernes
+    item: { tipo: 'RECURRENTE', frecuencia: 'SEMANAL', titulo: 'Subir al Drive los archivos de la PC del trabajo',
+            notas: 'Facturas, escritos hechos en Word y guardados en la PC, y PDF firmados.' } };
+
+  function itemSubirDrive() {
+    return ((agenda.datos && agenda.datos.items) || []).filter(function (x) { return x.id === SUBIR_DRIVE.id && x.estado !== 'BORRADO'; })[0] || null;
+  }
+
+  /** Lo agrega a la Agenda la primera vez. Si Carlos lo borra, no vuelve a aparecer. */
+  function asegurarSubirDrive() {
+    if (itemSubirDrive() || leer(LS.drive)) return;
+    guardar(LS.drive, hoyInput());
+    mandar({ a: 'agendaGuardar', item: Object.assign({ id: SUBIR_DRIVE.id }, SUBIR_DRIVE.item), nuevo: true, creado: hoyInput() }, 'Recordatorio semanal del Drive')
+      .then(function (d) {
+        if (d) recibirAgenda(d);
+        else agendaLocal(function (items) { return items.concat([Object.assign({ id: SUBIR_DRIVE.id, estado: 'PENDIENTE', creado: hoyInput(), ultHecho: '' }, SUBIR_DRIVE.item)]); });
+        if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();
+      }).catch(function () { localStorage.removeItem(LS.drive); });
+  }
+
+  /** Aparece desde el viernes si esta semana no se marcó; si la semana pasada tampoco, aparece todos los días. */
+  function subirDrivePendiente(it, hoy) {
+    if (!it) return null;
+    var lunes = Agenda.periodo('SEMANAL', hoy), ult = it.ultHecho || '';
+    if (ult >= lunes) return null;
+    if (!ult || ult < Agenda.sumarDias(lunes, -7)) return { atrasado: !!ult };
+    return Agenda.diasEntre(lunes, hoy) >= SUBIR_DRIVE.desdeDia ? { atrasado: false } : null;
+  }
+
+  function avisoSubirDrive() {
+    var b = $('aviso-drive');
+    if (!b) return;
+    var it = itemSubirDrive(), p = subirDrivePendiente(it, hoyInput());
+    b.hidden = !p;
+    b.textContent = '';
+    if (!p) return;
+    b.appendChild(h('div', { class: 'aviso-drive-texto' },
+      h('b', { text: p.atrasado ? '📤 Quedó pendiente de la semana pasada: ' : '📤 Recordatorio semanal: ' }),
+      'subí al Drive lo guardado en la PC del trabajo: facturas, escritos en Word y PDF firmados.' + (it.ultHecho ? ' Última vez: ' + Agenda.dmy(it.ultHecho) + '.' : '')));
+    b.appendChild(h('div', { class: 'aviso-drive-botones' },
+      h('button', { class: 'btn chico primario', type: 'button', onclick: function () { marcarAgenda(it, 'HECHO', 'Anotado: archivos subidos al Drive'); } }, 'Ya lo subí'),
+      h('a', { class: 'btn chico', href: 'https://drive.google.com/drive/my-drive', target: '_blank', rel: 'noopener' }, 'Abrir Drive ↗')));
   }
 
   function recibirAgenda(d) {
@@ -1973,6 +2020,7 @@
     }).then(function (d) {
       if (!d.items) throw new Error('El servidor (Apps Script) todavía no tiene la Agenda: falta pegar el código nuevo y crear una "Nueva versión".');
       recibirAgenda(d);
+      asegurarSubirDrive();
     }).catch(function (e) { agenda.error = esDeRed(e) && agenda.datos ? 'Sin conexión: podés seguir usando la agenda; los cambios se envían solos al volver la señal.' : traducirError(e); }).then(function () {
       if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();      // no le borra lo que está escribiendo
     });

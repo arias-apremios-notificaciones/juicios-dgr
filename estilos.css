@@ -463,3 +463,10 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .aviso-cola { padding: 7px 16px; font-size: 13.5px; font-weight: 700; text-align: center; background: #FFF4D6; color: #6B4E00; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso-cola { background: #3A2F12; color: #FFD866; } }
 :root[data-theme="dark"] .aviso-cola { background: #3A2F12; color: #FFD866; }
+/* Recordatorio semanal: subir al Drive lo de la PC del trabajo */
+.aviso-drive { padding: 8px 16px; font-size: 13.5px; background: #E3EEFF; color: #13306B; border-bottom: 1px solid #C4D6F5; }
+.aviso-drive-texto { line-height: 1.35; }
+.aviso-drive-botones { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.aviso-drive-botones .btn { text-decoration: none; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso-drive { background: #16264A; color: #CFE0FF; border-color: #263D6E; } }
+:root[data-theme="dark"] .aviso-drive { background: #16264A; color: #CFE0FF; border-color: #263D6E; }
