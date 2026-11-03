@@ -455,3 +455,11 @@ details.grupo[open] > summary::before { content: "▾ "; }
 /* "¿Actualizar el MAESTRO y HONORARIOS?" después de generar un escrito o un formulario */
 .actualizar-hon { margin-top: 10px; padding: 10px 12px; border: 1px dashed var(--borde); border-radius: 10px; background: var(--superficie-2); display: flex; flex-direction: column; gap: 6px; }
 .actualizar-hon.hecho { border-style: solid; }
+/* Comprobantes de pago (columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS) */
+.comprobantes-cobro { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 4px 0 6px; font-size: 13.5px; }
+.enlace-comprobante { color: var(--enfasis); font-weight: 600; text-decoration: none; overflow-wrap: anywhere; }
+.btn.chico { padding: 4px 10px; font-size: 13px; min-height: 0; }
+/* Cambios hechos sin conexión que esperan la señal */
+.aviso-cola { padding: 7px 16px; font-size: 13.5px; font-weight: 700; text-align: center; background: #FFF4D6; color: #6B4E00; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso-cola { background: #3A2F12; color: #FFD866; } }
+:root[data-theme="dark"] .aviso-cola { background: #3A2F12; color: #FFD866; }

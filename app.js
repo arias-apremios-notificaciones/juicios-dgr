@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmar: 'jdgr.firmar', cola: 'jdgr.cola' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -88,11 +88,14 @@
   }
 
   // ───────── API (Apps Script) ─────────
+  /** fetch falló sin respuesta del servidor: no hay señal (o no se llega a Google). */
+  function errorDeRed(e) { var x = new Error((e && e.message) || 'Sin conexión'); x.red = true; throw x; }
+
   function api(params) {
     var cfg = estado.cfg;
     if (!cfg) return Promise.reject(new Error('Falta configurar la app'));
     var qs = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
-    return fetch(cfg.u + '?' + qs + '&k=' + encodeURIComponent(cfg.k), { redirect: 'follow' })
+    return fetch(cfg.u + '?' + qs + '&k=' + encodeURIComponent(cfg.k), { redirect: 'follow' }).catch(errorDeRed)
       .then(function (r) { if (!r.ok) throw new Error('Error ' + r.status); return r.json(); })
       .then(function (j) { if (!j.ok) throw new Error(j.error || 'Error del servidor'); return j; });
   }
@@ -602,9 +605,75 @@
     var cfg = estado.cfg;
     if (!cfg) return Promise.reject(new Error('Falta configurar la app'));
     // Texto plano: así el navegador no hace el control previo de CORS que Apps Script no responde.
-    return fetch(cfg.u, { method: 'POST', body: JSON.stringify(Object.assign({ k: cfg.k }, cuerpo)), redirect: 'follow' })
+    return fetch(cfg.u, { method: 'POST', body: JSON.stringify(Object.assign({ k: cfg.k }, cuerpo)), redirect: 'follow' }).catch(errorDeRed)
       .then(function (r) { if (!r.ok) throw new Error('Error ' + r.status); return r.json(); })
       .then(function (j) { if (!j.ok) throw new Error(j.error || 'Error del servidor'); return j; });
+  }
+
+  // ───────── Sin conexión: los cambios quedan en una cola y se mandan solos, en orden, al volver la señal ─────────
+  // Solo lo que se puede hacer sin respuesta del servidor: Agenda (agregar, editar, cumplido, borrar) y Para firmar (Presentado, Descartar).
+  // Honorarios no: el PIN lo controla el servidor y esos datos no se guardan en el teléfono.
+  var cola = { items: leer(LS.cola) || [], enviando: false };
+
+  function hayRed() { return navigator.onLine !== false; }
+  function esDeRed(e) { return !!(e && (e.red || /Failed to fetch|NetworkError|Load failed/i.test(String(e.message)))); }
+
+  function encolar(cuerpo, desc) {
+    cola.items.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), cuerpo: cuerpo, desc: desc, creado: Date.now() });
+    guardar(LS.cola, cola.items);
+    mostrarCola();
+  }
+
+  /** Manda al servidor. Sin señal (o si ya hay cambios esperando, para no desordenarlos) queda en la cola y devuelve null. */
+  function mandar(cuerpo, desc) {
+    if (!hayRed() || cola.items.length) { encolar(cuerpo, desc); enviarCola(); return Promise.resolve(null); }
+    return apiPost(cuerpo).catch(function (e) { if (!esDeRed(e)) throw e; encolar(cuerpo, desc); return null; });
+  }
+
+  function enviarCola() {
+    if (cola.enviando || !cola.items.length || !hayRed() || !estado.cfg) return Promise.resolve();
+    cola.enviando = true;
+    var enviados = 0, rechazados = [], agendaResp = null, firmarCambio = false;
+    var sacar = function (x) { cola.items = cola.items.filter(function (y) { return y.id !== x.id; }); guardar(LS.cola, cola.items); };
+    var paso = function () {
+      var x = cola.items[0];
+      if (!x) return Promise.resolve();
+      return apiPost(x.cuerpo).then(function (r) {
+        sacar(x); enviados++;
+        if (r && r.items) agendaResp = r;
+        if (x.cuerpo.a === 'presentado' || x.cuerpo.a === 'descartar') firmarCambio = true;
+        return paso();
+      }, function (e) {
+        if (esDeRed(e)) throw e;                                   // sigue sin señal: se reintenta después
+        sacar(x); rechazados.push(x.desc + ': ' + traducirError(e));   // el servidor no lo aceptó (por ejemplo, ya no existe)
+        return paso();
+      });
+    };
+    return paso().catch(function () {}).then(function () {
+      cola.enviando = false;
+      mostrarCola();
+      if (enviados) aviso(enviados === 1 ? 'Se envió 1 cambio hecho sin conexión' : 'Se enviaron ' + enviados + ' cambios hechos sin conexión');
+      if (rechazados.length) alert('No se pudieron enviar estos cambios hechos sin conexión:\n\n' + rechazados.join('\n'));
+      if (agendaResp && !cola.items.some(function (x) { return /^agenda/.test(x.cuerpo.a); })) {
+        recibirAgenda(agendaResp);
+        if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();
+      }
+      if (firmarCambio) { refrescar(true); if (estado.vista === 'firmar') cargarFirmar(); }
+    });
+  }
+
+  function mostrarCola() {
+    var b = $('aviso-cola'), n = cola.items.length;
+    if (!b) return;
+    b.hidden = !n;
+    b.textContent = '⏳ ' + (n === 1 ? '1 cambio hecho sin conexión: se envía solo' : n + ' cambios hechos sin conexión: se envían solos') + ' al volver la señal';
+  }
+
+  /** Ids de escritos marcados sin conexión (todavía no llegaron al servidor). */
+  function escritosEnCola() {
+    var ids = {};
+    cola.items.forEach(function (x) { if (x.cuerpo.a === 'presentado' || x.cuerpo.a === 'descartar') x.cuerpo.ids.forEach(function (i) { ids[i] = true; }); });
+    return ids;
   }
 
   function cambiarVista(v) {
@@ -638,16 +707,27 @@
     firmar.cargando = true;
     if (!firmar.datos) pintarFirmar();
     api({ a: 'escritos' }).then(function (d) {
-      firmar.datos = d;
+      d.guardado = Date.now();
+      guardar(LS.firmar, d);
+      quitarEnCola(d);
+      firmar.datos = d; firmar.sinRed = false;
       Object.keys(firmar.sel).forEach(function (id) { if (!d.porFirmar.some(function (x) { return x.id === id; })) delete firmar.sel[id]; });
       firmar.cargando = false;
       pintarFirmar();
       if (d.enCurso || d.uniendoArca || d.revisandoIvp) setTimeout(function () { if (estado.vista === 'firmar') cargarFirmar(); }, 20000);
     }).catch(function (e) {
       firmar.cargando = false;
+      var copia = esDeRed(e) && (firmar.datos || leer(LS.firmar));
+      if (copia) { quitarEnCola(copia); firmar.datos = copia; firmar.sinRed = true; pintarFirmar(); return; }
       $('firmar').textContent = '';
-      $('firmar').appendChild(h('p', { class: 'error', text: 'No se pudo cargar: ' + e.message }));
+      $('firmar').appendChild(h('p', { class: 'error', text: 'No se pudo cargar: ' + traducirError(e) }));
     });
+  }
+
+  /** Los escritos ya marcados sin conexión no se muestran como pendientes. */
+  function quitarEnCola(d) {
+    var ids = escritosEnCola();
+    if (d && d.porFirmar) d.porFirmar = d.porFirmar.filter(function (x) { return !ids[x.id]; });
   }
 
   function contarFirmar(n) {
@@ -672,6 +752,9 @@
       return;
     }
     contarFirmar(d.porFirmar.length);
+    if (firmar.sinRed) cont.appendChild(h('div', { class: 'panel caja-aviso' }, h('b', { text: 'Sin conexión' }),
+      h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Es la lista guardada' + (d.guardado ? ' el ' + new Date(d.guardado).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '') +
+        '. Podés tildar y marcar "Presentado" o "Descartar": se anota en el MAESTRO, con la fecha de hoy, al volver la señal. Los PDF necesitan conexión para abrirse.' })));
 
     // Errores del motor en los últimos 7 días (para enterarse sin mirar Google)
     if (d.errores && d.errores.length) {
@@ -894,9 +977,10 @@
                  '?\n\nSe va a anotar en el seguimiento del MAESTRO, con la fecha de hoy, lo que corresponde a cada uno (PIDO SENTENCIA, COMUNICO CANCELACIÓN…).' +
                  (conEstado ? '\nEn ' + conEstado + ' también se actualiza el ESTADO (CANCELADO TOTAL / PARCIAL).' : ''))) return;
     $('btn-presentados').disabled = true;
-    apiPost({ a: 'presentado', ids: ids }).then(function (r) {
+    mandar({ a: 'presentado', ids: ids, fecha: hoyInput() }, 'Presentado: ' + ids.length + (ids.length === 1 ? ' escrito' : ' escritos')).then(function (r) {
       $('btn-presentados').disabled = false;
       firmar.sel = {};
+      if (!r) { sacarDeFirmar(ids); aviso('Sin conexión: se anota en el MAESTRO al volver la señal'); return; }
       aviso('Anotado en el MAESTRO: ' + r.presentados.length + ' juicio(s)' + (r.noEncontrados.length ? ' · no encontrados: ' + r.noEncontrados.join(', ') : ''));
       refrescar(true); cargarFirmar();
     }).catch(function (e) { $('btn-presentados').disabled = false; aviso('No se pudo: ' + traducirError(e)); });
@@ -904,11 +988,21 @@
 
   function descartar(x) {
     if (!confirm('¿Descartar el escrito de ' + x.d + ' (' + x.e + ')? El PDF va a la papelera de Drive.')) return;
-    apiPost({ a: 'descartar', ids: [x.id] }).then(function () {
+    mandar({ a: 'descartar', ids: [x.id] }, 'Descartar: ' + x.d).then(function (r) {
       delete firmar.sel[x.id];
+      if (!r) { sacarDeFirmar([x.id]); aviso('Sin conexión: se descarta al volver la señal'); return; }
       aviso('Escrito descartado');
       cargarFirmar();
     }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
+  }
+
+  /** Sin conexión: saca los escritos de la lista (y de la copia guardada) hasta que el servidor los procese. */
+  function sacarDeFirmar(ids) {
+    if (!firmar.datos) return;
+    firmar.datos.porFirmar = firmar.datos.porFirmar.filter(function (x) { return ids.indexOf(x.id) < 0; });
+    var copia = leer(LS.firmar);
+    if (copia && copia.porFirmar) { copia.porFirmar = copia.porFirmar.filter(function (x) { return ids.indexOf(x.id) < 0; }); guardar(LS.firmar, copia); }
+    pintarFirmar();
   }
 
   // ───────── Honorarios: tablero de cobro (la planilla HONORARIOS es el archivo principal; la app solo la lee) ─────────
@@ -938,6 +1032,7 @@
   });
 
   function pintarPin() {
+    if (!hayRed()) return honSinRed();
     var cont = $('honorarios');
     cont.textContent = '';
     if (hon.pinEstado === null) {
@@ -1007,8 +1102,16 @@
   /** Hay un formulario abierto en Honorarios (Anotar, Escrito, Formulario RH…): una recarga automática no lo borra. */
   function honEditando() { return !!$('honorarios').querySelector('.area-accion form, .area-accion .form-hon'); }
 
+  function honSinRed() {
+    var c = $('honorarios');
+    c.textContent = '';
+    c.appendChild(h('div', { class: 'vacio' }, h('h2', { text: 'Honorarios necesita conexión' }),
+      h('p', { text: 'El PIN lo controla el servidor y los datos de honorarios no se guardan en el teléfono. Volvé a entrar cuando tengas señal.' })));
+  }
+
   function cargarHonorarios(silencioso) {
     if (!estado.cfg || hon.cargando) return;
+    if (!hayRed() && !hon.datos) { honSinRed(); return; }
     if (!hon.pin) { pintarPin(); return; }
     hon.cargando = true;
     if (!hon.datos) pintarHonorarios();
@@ -1117,7 +1220,11 @@
       h('div', { class: 'fila-panel' }, h('h2', { text: 'Cobrado en ' + m.nombre.toLowerCase() + ' ' + m.anio }), h('b', { class: 'monto-grande', text: importe(m.total) })),
       h('div', { class: 'ayuda chica', style: 'color:inherit', text: m.registrados.length ? m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros') + ' con FECHA DE PAGO en la planilla' : 'No hay cobros con FECHA DE PAGO en ese mes' }));
     m.registrados.forEach(function (x) {
+      var area = h('div', { class: 'area-accion' });
       pm.appendChild(h('div', { class: 'linea-cobro' }, h('span', { text: fechaIsoCorta(x.pago) }), h('span', { text: x.d + ' · ' + x.e }), h('b', { text: importe(x.monto) })));
+      pm.appendChild(h('div', { class: 'comprobantes-cobro' }, enlacesComprobantes(x),
+        h('button', { class: 'btn chico', type: 'button', onclick: function () { accion(area, 'comprobante', x, hon.datos); } }, (x.comprobantes || []).length ? '+ Comprobante' : '📎 Adjuntar comprobante')));
+      pm.appendChild(area);
     });
     pm.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit;margin-top:8px;display:flex;gap:14px;flex-wrap:wrap' },
       m.pdf ? h('a', { href: m.pdf.url, target: '_blank', rel: 'noopener', text: 'Reporte en PDF ↗' }) : h('span', { text: 'El PDF se genera solo el primer día hábil del mes.' }),
@@ -1273,11 +1380,13 @@
       x.plan ? h('div', { class: 'meta', text: 'Plan: ' + x.plan.cantidad + ' cuotas de ' + importe(x.plan.monto) + ' · pagadas ' + x.plan.pagadas + (x.plan.proximo ? ' · próxima ' + fechaIso(x.plan.proximo) : '') }) : null,
       h('div', { class: 'motivo tranquilo', text: x.ult ? 'Último: ' + fechaIso(x.ult.fecha) + ' (' + diasTexto(diasDesdeIso(x.ult.fecha)) + ') · ' + x.ult.texto : 'Sin movimientos con fecha' }),
       x.paso ? h('div', { class: 'paso', text: '→ Tu próximo paso: ' + x.paso.texto }) : null,
+      (x.comprobantes || []).length ? h('div', { class: 'comprobantes-cobro' }, enlacesComprobantes(x)) : null,
       h('div', { class: 'botones-hon' },
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'anotar', x, d); } }, 'Anotar'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'reclamar', x, d); } }, 'Reclamar'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, x.plan ? 'cuota' : 'cobro', x, d); } }, x.plan ? 'Cobrar cuota' : 'Cobro'),
         x.plan ? null : h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'plan', x, d); } }, 'Cuotas'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'comprobante', x, d); } }, 'Comprobante'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'formulario', x, d); } }, 'Formulario RH'),
         h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'escrito', x, d); } }, 'Escrito'),
         linkHon(x.r, 'Fila ↗')),
@@ -1348,13 +1457,17 @@
       var fe = h('input', { class: 'campo-form', type: 'date', value: hoyInput(), 'aria-label': 'Fecha de pago' });
       var mo = h('select', { class: 'campo-form', 'aria-label': 'Modo de pago' }, h('option', { value: '', text: 'Modo de pago…' }), (d.modosPago || []).map(function (m) { return h('option', { value: m, text: m }); }));
       var fa = h('input', { class: 'campo-form', placeholder: 'Factura / recibo (opcional)', 'aria-label': 'Factura' });
+      var comp = camposComprobante();
       var cuotaTxt = x.plan ? 'cuota ' + (x.plan.pagadas + 1) + ' de ' + x.plan.cantidad + ' (' + importe(x.plan.monto) + ')' : '';
       form([h('div', { class: 'ayuda chica', text: tipo === 'cuota' ? 'Cobro de la ' + cuotaTxt + '.' + (x.plan.pagadas + 1 === x.plan.cantidad ? ' Es la última: la fila queda cobrada (amarilla).' : ' Sale de la lista hasta la semana del próximo vencimiento.')
-                                                      : 'Se completa FECHA DE PAGO, MODO y FACTURA, y la fila se pinta de amarillo.' }), fe, mo, fa,
+                                                      : 'Se completa FECHA DE PAGO, MODO y FACTURA, y la fila se pinta de amarillo.' }), fe, mo, fa, comp.nodo,
             h('button', { class: 'btn primario', type: 'submit' }, tipo === 'cuota' ? 'Registrar cobro de la cuota' : 'Registrar cobro')], function () {
         if (!mo.value) { aviso('Elegí el modo de pago'); return; }
+        var arch = comp.archivo.files[0];
         escribirHon(Object.assign({ a: tipo === 'cuota' ? 'honCuota' : 'honCobro', fecha: isoADmy(fe.value), modo: mo.value, factura: fa.value }, base),
-          (tipo === 'cuota' ? '¿Registrar el cobro de la ' + cuotaTxt : '¿Registrar el cobro de ' + importe(x.saldo != null ? x.saldo : x.monto)) + ' de ' + x.d + ' (' + x.e + ')?\n\nFecha: ' + isoADmy(fe.value) + ' · ' + mo.value + (fa.value ? ' · Factura ' + fa.value : ''), 'Cobro registrado');
+          (tipo === 'cuota' ? '¿Registrar el cobro de la ' + cuotaTxt : '¿Registrar el cobro de ' + importe(x.saldo != null ? x.saldo : x.monto)) + ' de ' + x.d + ' (' + x.e + ')?\n\nFecha: ' + isoADmy(fe.value) + ' · ' + mo.value + (fa.value ? ' · Factura ' + fa.value : '') +
+          (arch ? '\n\nY se guarda el comprobante (' + comp.tipo.options[comp.tipo.selectedIndex].text.toLowerCase() + ') en la columna AGREGAR FACTURA/CARTA DE PAGO.' : ''), 'Cobro registrado')
+          .then(function (ok) { if (ok && arch) subirComprobante(x, comp.tipo.value, fa.value, arch); });
       });
     } else if (tipo === 'plan') {
       var n = h('input', { class: 'campo-form', type: 'number', min: '2', max: '36', value: '3', 'aria-label': 'Cantidad de cuotas' });
@@ -1368,11 +1481,75 @@
         escribirHon(Object.assign({ a: 'honPlanCuotas', cantidad: n.value, monto: mc.value, primera: isoADmy(pr.value) }, base),
           'Plan de ' + n.value + ' cuotas de ' + importe(Number(mc.value)) + ', 1ª el ' + isoADmy(pr.value) + ', para ' + x.d + ' (' + x.e + '). ¿Confirmás?', 'Plan guardado');
       });
+    } else if (tipo === 'comprobante') {
+      var cc = camposComprobante(true);
+      form([h('div', { class: 'ayuda chica', text: 'Factura, recibo o carta de pago (PDF o foto). Se guarda en el Drive y queda como enlace en la columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS: tocándolo se abre.' }),
+            cc.nodo, h('button', { class: 'btn primario', type: 'submit' }, 'Guardar comprobante')], function () {
+        var a = cc.archivo.files[0];
+        if (!a) { aviso('Elegí el archivo'); return; }
+        if (!confirm('¿Guardar ' + cc.tipo.options[cc.tipo.selectedIndex].text.toLowerCase() + (cc.numero.value ? ' ' + cc.numero.value : '') + ' de ' + x.d + ' (' + x.e + ')?\n\nArchivo: ' + a.name)) return;
+        area.textContent = ''; area.dataset.tipo = '';
+        subirComprobante(x, cc.tipo.value, cc.numero.value, a);
+      });
     } else if (tipo === 'formulario') {
       formularioRH(area, x);
     } else if (tipo === 'escrito') {
       area.appendChild(formEscritoHon({ e: x.e, d: x.d, r: x.r, saldo: x.saldo != null ? x.saldo : x.monto }));
     }
+  }
+
+  // ───────── Comprobantes de pago: columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS ─────────
+  var TIPOS_COMPROBANTE = [['FACTURA', 'Factura'], ['RECIBO', 'Recibo'], ['CARTA', 'Carta de pago']];
+  var MAX_COMPROBANTE = 15 * 1024 * 1024;
+
+  function enlacesComprobantes(x) {
+    return (x.comprobantes || []).map(function (c) { return h('a', { class: 'enlace-comprobante', href: c.url, target: '_blank', rel: 'noopener', text: '📎 ' + (c.texto || 'Comprobante') }); });
+  }
+
+  /** Tipo, número y archivo. conNumero: pide también el número (al registrar un cobro ya se carga en "Factura / recibo"). */
+  function camposComprobante(conNumero) {
+    var tipo = h('select', { class: 'campo-form', 'aria-label': 'Tipo de comprobante' }, TIPOS_COMPROBANTE.map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
+    var numero = h('input', { class: 'campo-form', placeholder: 'Número (opcional)', 'aria-label': 'Número del comprobante', maxlength: '30' });
+    var archivo = h('input', { class: 'campo-form', type: 'file', accept: 'application/pdf,image/*', 'aria-label': 'Archivo del comprobante' });
+    return { tipo: tipo, numero: numero, archivo: archivo,
+             nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: conNumero ? 'Comprobante' : 'Comprobante (opcional): factura, recibo o carta de pago' }), tipo, conNumero ? numero : null, archivo) };
+  }
+
+  /** PDF tal cual; las fotos grandes se achican (el teléfono saca fotos de varios MB). */
+  function prepararArchivo(f) {
+    var mime = f.type || (/\.pdf$/i.test(f.name) ? 'application/pdf' : '');
+    var leerB64 = function (blob) {
+      return new Promise(function (ok, mal) {
+        var fr = new FileReader();
+        fr.onload = function () { ok(String(fr.result).split(',')[1] || ''); };
+        fr.onerror = function () { mal(new Error('No se pudo leer el archivo')); };
+        fr.readAsDataURL(blob);
+      });
+    };
+    if (!/^image\/(jpeg|png)$/.test(mime) || f.size < 1500000) {
+      if (f.size > MAX_COMPROBANTE) return Promise.reject(new Error('El archivo pesa más de 15 MB'));
+      return leerB64(f).then(function (d) { return { mime: mime, datos: d }; });
+    }
+    return new Promise(function (ok) {
+      var img = new Image(), u = URL.createObjectURL(f);
+      img.onload = function () {
+        var k = Math.min(1, 2000 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+        c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(u);
+        ok({ mime: 'image/jpeg', datos: c.toDataURL('image/jpeg', 0.85).split(',')[1] });
+      };
+      img.onerror = function () { URL.revokeObjectURL(u); ok(leerB64(f).then(function (d) { return { mime: mime, datos: d }; })); };
+      img.src = u;
+    });
+  }
+
+  function subirComprobante(x, tipo, numero, archivo) {
+    aviso('Subiendo el comprobante…');
+    return prepararArchivo(archivo).then(function (a) {
+      return apiPost({ a: 'honComprobante', pin: hon.pin, r: x.r, e: x.e, tipo: tipo, numero: numero || '', mime: a.mime, datos: a.datos });
+    }).then(function (r) { aviso('Comprobante guardado: ' + r.celda); cargarHonorarios(true); })
+      .catch(function (e) { aviso('No se pudo guardar el comprobante: ' + traducirError(e)); });
   }
 
   // ───────── Escritos para cobrar honorarios (modelos sellados el 30/10/2026; EscritosHon.js) ─────────
@@ -1577,7 +1754,7 @@
       boton.disabled = true;
       resultado.textContent = '';
       resultado.appendChild(h('div', { class: 'ayuda chica', text: 'Armando el PDF: 1 o 2 minutos. Podés seguir usando la app: cuando esté listo lo vas a encontrar en Honorarios → Escritos y Formulario RH → "Generados esta semana".' }));
-      apiPost({ a: 'honFormPedir', pin: hon.pin, e: r.e, d: r.d, r: r.r || '', campos: datos, ivpPdf: r.ivp.pdf }).then(function (p) {
+      apiPost({ a: 'honFormPedir', pin: hon.pin, e: r.e, d: r.d, r: r.r || '', campos: datos, ivpPdf: r.ivp.pdf, sae: r.sae || null }).then(function (p) {
         if (hon.datos) (hon.datos.formularios = hon.datos.formularios || []).unshift({ job: p.job, e: r.e, d: r.d, r: r.r || '', creado: Date.now(), estado: 'EN_COLA', anotado: null });
         formRH.vistas[p.job] = { resultado: resultado, boton: boton };
         refrescarGenerados();
@@ -1603,7 +1780,7 @@
       Promise.all(pend.map(function (x) {
         return apiPost({ a: 'honFormEstado', pin: hon.pin, j: x.job }).then(function (r) {
           if (r.estado === 'EN_COLA') return;
-          Object.assign(x, { estado: r.estado, url: r.url, carpeta: r.carpeta, nombre: r.nombre, ivpCopiado: r.ivpCopiado, error: r.error });
+          Object.assign(x, { estado: r.estado, url: r.url, carpeta: r.carpeta, nombre: r.nombre, ivpCopiado: r.ivpCopiado, sentencias: r.sentencias, error: r.error });
           aviso(r.estado === 'LISTO' ? 'Formulario listo: ' + x.d : 'No se pudo armar el formulario de ' + x.d);
           var v = formRH.vistas[x.job];
           delete formRH.vistas[x.job];
@@ -1624,8 +1801,15 @@
       h('div', { class: 'botones-hon' },
         h('a', { class: 'btn primario', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir formulario'),
         h('a', { class: 'btn', href: x.carpeta, target: '_blank', rel: 'noopener' }, 'Abrir carpeta')),
-      h('div', { class: 'ayuda chica', text: (x.ivpCopiado ? 'El IVP ya está en la carpeta. ' : 'Agregá el PDF del IVP a la carpeta. ') + 'Falta el PDF de la sentencia: el SAE solo entrega el texto, así que hay que bajarlo del portal y guardarlo ahí.' }),
+      h('div', { class: 'ayuda chica', text: (x.ivpCopiado ? 'El IVP ya está en la carpeta. ' : 'Agregá el PDF del IVP a la carpeta. ') + textoSentencias(x.sentencias) }),
       panelActualizar(x));
+  }
+
+  function textoSentencias(s) {
+    var minus = function (l) { return l.map(function (t) { return t.toLowerCase(); }).join(' y la '); };
+    if (!s) return 'Falta el PDF de la sentencia: bajalo del portal del SAE y guardalo en la carpeta.';
+    return (s.copiadas.length ? 'También quedó la ' + minus(s.copiadas) + ', bajada del SAE. ' : '') +
+           (s.faltan.length ? 'No pude bajar del SAE la ' + minus(s.faltan) + (s.motivo ? ' (' + s.motivo + ')' : '') + ': bajala del portal y guardala en la carpeta.' : '');
   }
 
   // ───────── Generados esta semana: escritos (de esta sesión) y formularios RH (del servidor, 7 días) ─────────
@@ -1782,10 +1966,14 @@
 
   function cargarAgenda() {
     if (!estado.cfg) return Promise.resolve();
-    return api({ a: 'agenda' }).then(function (d) {
+    return enviarCola().then(function () {
+      // Con cambios todavía sin enviar, la copia del teléfono es la que está al día.
+      if (cola.items.some(function (x) { return /^agenda/.test(x.cuerpo.a); })) { var e = new Error('Sin conexión'); e.red = true; throw e; }
+      return api({ a: 'agenda' });
+    }).then(function (d) {
       if (!d.items) throw new Error('El servidor (Apps Script) todavía no tiene la Agenda: falta pegar el código nuevo y crear una "Nueva versión".');
       recibirAgenda(d);
-    }).catch(function (e) { agenda.error = traducirError(e); }).then(function () {
+    }).catch(function (e) { agenda.error = esDeRed(e) && agenda.datos ? 'Sin conexión: podés seguir usando la agenda; los cambios se envían solos al volver la señal.' : traducirError(e); }).then(function () {
       if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();      // no le borra lo que está escribiendo
     });
   }
@@ -1796,11 +1984,26 @@
   }
 
   function marcarAgenda(it, accion, texto) {
-    apiPost({ a: 'agendaMarcar', id: it.id, accion: accion }).then(function (d) {
-      recibirAgenda(d);
+    mandar({ a: 'agendaMarcar', id: it.id, accion: accion, fecha: hoyInput() }, texto + ': ' + it.titulo).then(function (d) {
+      if (d) recibirAgenda(d);
+      else agendaLocal(function (items) {
+        var x = items.filter(function (y) { return y.id === it.id; })[0];
+        if (!x) return items;
+        if (accion === 'BORRAR') return items.filter(function (y) { return y !== x; });
+        if (accion === 'HECHO') { if (x.tipo !== 'RECURRENTE') x.estado = 'HECHO'; x.ultHecho = hoyInput(); }
+        if (accion === 'REABRIR') { x.estado = 'PENDIENTE'; x.ultHecho = ''; }
+        return items;
+      });
       pintarAgenda();
-      aviso(texto);
+      aviso(texto + (d ? '' : ' (sin conexión: se envía al volver la señal)'));
     }).catch(function (e) { aviso(traducirError(e)); });
+  }
+
+  /** Cambio hecho sin conexión: se aplica a la copia del teléfono (el servidor lo recibe después, desde la cola). */
+  function agendaLocal(cambiar) {
+    var d = agenda.datos || { ok: true, items: [], inhabiles: [] };
+    d.items = cambiar(d.items.slice());
+    recibirAgenda(d);
   }
 
   function tarjetaAgenda(it, hoy, inh) {
@@ -1904,12 +2107,19 @@
       var v = Agenda.validar(f, inh);
       if (!v.ok) { error.textContent = v.error; error.hidden = false; return; }
       guardarBtn.disabled = true;
-      apiPost({ a: 'agendaGuardar', item: f }).then(function (d) {
+      // El id de lo nuevo lo pone la app: así se puede editar o marcar aunque todavía no haya llegado al servidor.
+      var nuevo = !f.id, item = Object.assign({}, f, { id: f.id || 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5) });
+      mandar({ a: 'agendaGuardar', item: item, nuevo: nuevo, creado: hoyInput() }, (nuevo ? 'Agregar a la agenda: ' : 'Editar: ') + v.item.titulo).then(function (d) {
         agenda.form = null;
         agenda.grupo = GRUPOS_AGENDA.filter(function (g) { return g.tipo === f.tipo; })[0].id;   // abre la tarjeta de lo que se guardó
-        recibirAgenda(d);
+        if (d) recibirAgenda(d);
+        else agendaLocal(function (items) {
+          var previo = items.filter(function (y) { return y.id === item.id; })[0];
+          var x = Object.assign({ estado: 'PENDIENTE', creado: hoyInput(), ultHecho: '' }, previo || {}, v.item, { id: item.id });
+          return previo ? items.map(function (y) { return y === previo ? x : y; }) : items.concat([x]);
+        });
         pintarAgenda();
-        aviso(d.aviso || 'Guardado en la agenda');
+        aviso(d ? d.aviso || 'Guardado en la agenda' : (v.aviso ? v.aviso + ' · ' : '') + 'Guardado en el teléfono: se envía al volver la señal');
       }).catch(function (e) {
         guardarBtn.disabled = false;
         error.textContent = traducirError(e);
@@ -1944,7 +2154,7 @@
     var cont = $('agenda');
     cont.textContent = '';
     if (!estado.cfg) { cont.appendChild(h('p', { class: 'ayuda', text: 'Configurá la app primero (engranaje).' })); return; }
-    if (agenda.error) cont.appendChild(h('div', { class: 'alerta', text: agenda.error + (agenda.datos ? ' Lo que ves es la última copia guardada.' : '') }));
+    if (agenda.error) cont.appendChild(h('div', { class: 'alerta', text: agenda.error + (agenda.datos && !/^Sin conexión/.test(agenda.error) ? ' Lo que ves es la última copia guardada.' : '') }));
     if (!agenda.datos) { if (!agenda.error) cont.appendChild(h('p', { class: 'ayuda', text: 'Cargando la agenda…' })); return; }
 
     var hoy = hoyInput(), inh = inhabilesAgenda(), s = Agenda.secciones(agenda.datos.items, hoy);
@@ -2209,13 +2419,17 @@
       cambiarVista('honorarios');
     });
     actualizarBtnHon();
-    if (estado.cfg) api({ a: 'escritos' }).then(function (d) { firmar.datos = d; if (d.porFirmar) contarFirmar(d.porFirmar.length); }).catch(function () {});
+    var copiaFirmar = leer(LS.firmar);
+    if (copiaFirmar && copiaFirmar.porFirmar) { quitarEnCola(copiaFirmar); contarFirmar(copiaFirmar.porFirmar.length); }
+    if (estado.cfg) api({ a: 'escritos' }).then(function (d) { d.guardado = Date.now(); guardar(LS.firmar, d); quitarEnCola(d); firmar.datos = d; if (d.porFirmar) contarFirmar(d.porFirmar.length); }).catch(function () {});
+    mostrarCola();
     q.addEventListener('input', render);
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });
     $('btn-limpiar').addEventListener('click', function () { q.value = ''; render(); q.focus(); });
     $('estado-sync').addEventListener('click', function () { refrescar(true); });
     document.addEventListener('visibilitychange', function () { if (!document.hidden) { refrescar(false); actualizarAlertasAgenda(); cargarAgenda(); } });
-    window.addEventListener('online', function () { refrescar(true); });
+    window.addEventListener('online', function () { enviarCola().then(function () { refrescar(true); cargarAgenda(); }); });
+    window.addEventListener('offline', function () { sync('Sin conexión · ' + haceCuanto(estado.generado), 'offline'); });
 
     render();
     refrescar(true);
