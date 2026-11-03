@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo', agendaGrupo: 'jdgr.agendaGrupo' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo', agendaGrupo: 'jdgr.agendaGrupo', honGrupo: 'jdgr.honGrupo' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -543,10 +543,10 @@
 
   // Tarjeta grande que abre una sección (Para firmar y Agenda), como los botones del portal del SAE.
   function tarjetaGrupo(o) {
-    var b = h('button', { type: 'button', class: 'tarjeta-grupo' + (o.abierta ? ' abierta' : '') + (o.numero ? '' : ' vacia') + (o.grave ? ' grave' : ''),
+    var b = h('button', { type: 'button', class: 'tarjeta-grupo' + (o.abierta ? ' abierta' : '') + (o.numero === 0 ? ' vacia' : '') + (o.grave ? ' grave' : ''),
                           'aria-expanded': o.abierta ? 'true' : 'false' },
       h('span', { class: 'tg-nombre', text: o.nombre }),
-      h('span', { class: 'tg-cuenta' }, h('b', { text: String(o.numero) }), ' ' + o.unidad),
+      o.numero == null ? null : h('span', { class: 'tg-cuenta' + (typeof o.numero === 'string' ? ' monto' : '') }, h('b', { text: String(o.numero) }), o.unidad ? ' ' + o.unidad : ''),
       (o.info || []).map(function (t) { return t ? h('span', { class: 'tg-info', text: t }) : null; }),
       o.alerta ? h('span', { class: 'tg-info tg-alerta', text: o.alerta }) : null,
       h('span', { class: 'tg-abrir', text: o.abierta ? 'Cerrar ▴' : 'Abrir ▾' }));
@@ -900,7 +900,7 @@
 
   // ───────── Honorarios: tablero de cobro (la planilla HONORARIOS es el archivo principal; la app solo la lee) ─────────
   // PIN: lo verifica el servidor; acá vive solo en memoria (no se guarda en el teléfono) y se borra al bloquear.
-  var hon = { datos: null, cargando: false, periodo: 'semana', soloColor: '', pin: null, pinEstado: null, msgPin: '', ultimoUso: 0, oculto: 0 };
+  var hon = { datos: null, cargando: false, periodo: 'semana', soloColor: '', pin: null, pinEstado: null, msgPin: '', ultimoUso: 0, oculto: 0, grupo: leer(LS.honGrupo) || 'semana' };
   var HON_INACTIVO_MS = 10 * 60 * 1000, HON_FUERA_MS = 2 * 60 * 1000;
 
   function bloquearHon(msg) {
@@ -1053,12 +1053,35 @@
         h('button', { class: 'btn', type: 'button', onclick: function () { hon.verDatosPago = !hon.verDatosPago; pintarHonorarios(); } }, 'Datos para transferencia')),
       hon.verDatosPago ? formDatosPago(d.datosPago || {}) : null));
 
-    // LISTADO DE LA SEMANA: todos los pendientes; salen solo cuando se cobran (29/10/2026)
-    pintarListadoSemanal(cont, d);
-    cont.appendChild(panelEscritoHon());
+    // Tarjetas: una por sección (como en Para firmar y Agenda)
+    var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
+    var problemasFact = F && !F.error && (F.sinFactura.length || F.sinCobro.length || F.diferencias.length);
+    var datosTarjeta = {
+      semana: { numero: L ? L.cantidad : 0, unidad: 'pendientes', info: L ? [importe(L.total), 'Tramitados: ' + L.tramitados + ' de ' + L.cantidad] : ['Se arma el domingo a la noche'] },
+      escritos: { info: ['Orden de pago, embargo, planilla y regulación', 'Formulario del Registro (Res. 546)'] },
+      cobrado: { numero: importe(m.total), unidad: '', info: [m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros')],
+                 alerta: problemasFact || m.enTexto.length ? '⚠ Hay algo para verificar' : '' },
+      tramitados: { numero: d.semana.lista.length, unidad: 'la semana pasada', info: ['Agosto – octubre: ' + d.primer.lista.length] },
+      revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] }
+    };
+    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar' };
+    var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
+    Object.keys(nombres).forEach(function (id) {
+      tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: nombres[id], abierta: hon.grupo === id,
+        onclick: function () { hon.grupo = hon.grupo === id ? null : id; guardar(LS.honGrupo, hon.grupo); pintarHonorarios(); } }, datosTarjeta[id])));
+    });
+    cont.appendChild(tarjetas);
 
-    // Cobrado el mes anterior (reporte mensual)
-    var m = d.mes;
+    if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
+    else if (hon.grupo === 'escritos') cont.appendChild(panelEscritoHon());
+    else if (hon.grupo === 'cobrado') pintarCobradoMes(cont, m);
+    else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
+    else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
+    else cont.appendChild(h('p', { class: 'ayuda chica', style: 'text-align:center', text: 'Tocá una tarjeta para ver su contenido.' }));
+  }
+
+  // Cobrado el mes anterior (reporte mensual) y facturas del mes
+  function pintarCobradoMes(cont, m) {
     var pm = h('div', { class: 'panel caja-ok' },
       h('div', { class: 'fila-panel' }, h('h2', { text: 'Cobrado en ' + m.nombre.toLowerCase() + ' ' + m.anio }), h('b', { class: 'monto-grande', text: importe(m.total) })),
       h('div', { class: 'ayuda chica', style: 'color:inherit', text: m.registrados.length ? m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros') + ' con FECHA DE PAGO en la planilla' : 'No hay cobros con FECHA DE PAGO en ese mes' }));
@@ -1093,9 +1116,10 @@
       m.enTexto.forEach(function (x) { pt.appendChild(h('div', { class: 'ayuda chica', style: 'color:inherit' }, fechaIsoCorta(x.fecha) + ' · ' + x.d + ' (' + x.e + '): ' + x.texto + ' ', linkHon(x.r, 'Abrir fila ↗'))); });
       cont.appendChild(pt);
     }
+  }
 
-    // Tramitados: semana pasada o primer reporte (agosto–octubre)
-    var per = hon.periodo === 'primer' ? d.primer : d.semana;
+  // Tramitados: semana pasada o primer reporte (agosto–octubre)
+  function pintarTramitados(cont, d, per) {
     var seg = h('div', { class: 'seg' },
       h('button', { type: 'button', class: hon.periodo === 'semana' ? 'activo' : '', onclick: function () { hon.periodo = 'semana'; pintarHonorarios(); } },
         'Semana pasada (' + fechaIsoCorta(d.semana.desde) + ' – ' + fechaIsoCorta(d.semana.hasta) + ')'),
@@ -1106,11 +1130,13 @@
     cont.appendChild(seg);
     if (!per.lista.length) cont.appendChild(h('p', { class: 'ayuda', text: 'No hay juicios pendientes con movimientos en el TRAMITE PENDIENTE de HONORARIOS en ese período.' }));
     per.lista.forEach(function (x) { cont.appendChild(tarjetaHon(x, x.movs)); });
+  }
 
-    // Para revisar: cruce HONORARIOS × MAESTRO × SAE
-    var dr = h('details', { class: 'grupo', open: d.cruces.length > 0 }, h('summary', { text: 'Para revisar (' + d.cruces.length + ')' }),
+  // Para revisar: cruce HONORARIOS × MAESTRO × SAE
+  function pintarParaRevisar(cont, d) {
+    var dr = h('div', null,
       h('p', { class: 'ayuda chica', text: 'Diferencias entre HONORARIOS, el MAESTRO y el SAE. Corregí la planilla y el aviso desaparece solo; si no corresponde, tocá "No corresponde".' }),
-      d.cruces.length ? h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.paraRevisar(d.cruces, TIPOS_CRUCE); } }, '🖨 Imprimir') : null);
+      d.cruces.length ? h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.paraRevisar(d.cruces, TIPOS_CRUCE); } }, '🖨 Imprimir') : h('p', { class: 'ayuda', text: 'No hay diferencias para revisar.' }));
     var grupos = {};
     d.cruces.forEach(function (x) { (grupos[x.tipo] = grupos[x.tipo] || []).push(x); });
     Object.keys(TIPOS_CRUCE).forEach(function (t) {
@@ -1416,23 +1442,35 @@
     return f;
   }
 
-  /** Para un juicio que no está en el listado semanal (por ejemplo, un pedido de regulación). */
+  /** Escritos de honorarios y Formulario RH para cualquier juicio del MAESTRO (también están en cada juicio del listado semanal). */
   function panelEscritoHon() {
     var caja = h('div'), lista = h('div', { class: 'man-lista' });
     var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor', 'aria-label': 'Expediente o deudor' });
+    var elegir = function (x) {
+      inp.value = x.e; lista.textContent = ''; caja.textContent = '';
+      var area = h('div', { class: 'area-accion' });
+      var saldo = hon.datos && hon.datos.listado && [].concat(hon.datos.listado.grupos.CUOTA, hon.datos.listado.grupos.PRIORIDAD, hon.datos.listado.grupos.RESTO)
+        .filter(function (y) { return y.e === x.e; })[0];
+      var j = { e: x.e, d: x.d, saldo: saldo ? (saldo.saldo != null ? saldo.saldo : saldo.monto) : null };
+      caja.appendChild(h('div', { class: 'item-rev' }, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e + (x.g ? ' · ' + x.g : '') }),
+        h('div', { class: 'botones-hon' },
+          h('button', { class: 'btn primario', type: 'button', onclick: function () { accion(area, 'escrito', j, hon.datos); } }, 'Escrito'),
+          h('button', { class: 'btn primario', type: 'button', onclick: function () { accion(area, 'formulario', j, hon.datos); } }, 'Formulario RH')),
+        area));
+    };
     inp.addEventListener('input', function () {
       lista.textContent = ''; caja.textContent = '';
       var t = inp.value.trim();
       if (!t) return;
       Buscador.buscar(estado.indice, t, 5).forEach(function (r) {
         var x = estado.filas[r.i];
-        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () {
-          inp.value = x.e; lista.textContent = ''; caja.textContent = '';
-          caja.appendChild(h('b', { text: x.d })); caja.appendChild(formEscritoHon({ e: x.e, d: x.d }));
-        } }, h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e + ' · ' + (x.g || '') })));
+        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { elegir(x); } },
+          h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e + ' · ' + (x.g || '') })));
       });
     });
-    return h('details', { class: 'grupo' }, h('summary', { text: 'Escrito de honorarios para otro juicio' }), inp, lista, caja);
+    return h('div', { class: 'panel' }, h('h2', { text: 'Escritos y Formulario RH' }),
+      h('p', { class: 'ayuda chica', text: 'Buscá el juicio y elegí: "Escrito" (orden de pago, embargo, planilla o regulación) o "Formulario RH" (Registro de Honorarios, Res. 546). Los escritos quedan en Para firmar → Honorarios y otros. También están en cada juicio del listado de la semana.' }),
+      inp, lista, caja);
   }
 
   // ───────── Formulario del Registro de Honorarios (Res. 546): revisar todo, cargar el monto y generar ─────────

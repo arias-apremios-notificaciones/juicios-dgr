@@ -257,6 +257,7 @@ ol.ayuda { padding-left: 20px; }
 .tarjeta-grupo .tg-nombre { font-size: 19px; font-weight: 800; line-height: 1.15; margin-bottom: 2px; max-width: 100%; hyphens: auto; -webkit-hyphens: auto; overflow-wrap: break-word; }
 .tarjeta-grupo .tg-cuenta { font-size: 13px; }
 .tarjeta-grupo .tg-cuenta b { display: block; font-size: 28px; line-height: 1.1; }
+.tarjeta-grupo .tg-cuenta.monto b { font-size: 21px; padding: 4px 0 2px; }
 .tarjeta-grupo .tg-info { font-size: 12px; opacity: .85; }
 .tarjeta-grupo .tg-alerta { opacity: 1; font-weight: 700; color: #FFD866; }
 .tarjeta-grupo.grave .tg-alerta { color: #fff; }
