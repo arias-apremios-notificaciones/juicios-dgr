@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo', agendaGrupo: 'jdgr.agendaGrupo', honGrupo: 'jdgr.honGrupo' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo', agendaGrupo: 'jdgr.agendaGrupo' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -549,7 +549,7 @@
       o.numero == null ? null : h('span', { class: 'tg-cuenta' + (typeof o.numero === 'string' ? ' monto' : '') }, h('b', { text: String(o.numero) }), o.unidad ? ' ' + o.unidad : ''),
       (o.info || []).map(function (t) { return t ? h('span', { class: 'tg-info', text: t }) : null; }),
       o.alerta ? h('span', { class: 'tg-info tg-alerta', text: o.alerta }) : null,
-      h('span', { class: 'tg-abrir', text: o.abierta ? 'Cerrar ▴' : 'Abrir ▾' }));
+      h('span', { class: 'tg-abrir', text: o.abierta ? 'Cerrar ▴' : o.entrar ? 'Abrir ›' : 'Abrir ▾' }));
     b.addEventListener('click', o.onclick);
     return b;
   }
@@ -900,7 +900,9 @@
 
   // ───────── Honorarios: tablero de cobro (la planilla HONORARIOS es el archivo principal; la app solo la lee) ─────────
   // PIN: lo verifica el servidor; acá vive solo en memoria (no se guarda en el teléfono) y se borra al bloquear.
-  var hon = { datos: null, cargando: false, periodo: 'semana', soloColor: '', pin: null, pinEstado: null, msgPin: '', ultimoUso: 0, oculto: 0, grupo: leer(LS.honGrupo) || 'semana' };
+  var hon = { datos: null, cargando: false, periodo: 'semana', soloColor: '', pin: null, pinEstado: null, msgPin: '', ultimoUso: 0, oculto: 0,
+              grupo: null,       // tarjeta abierta (null = las tarjetas); se recuerda mientras la app está abierta
+              generados: [] };   // escritos generados desde esta pestaña (los formularios RH vienen del servidor: hon.datos.formularios)
   var HON_INACTIVO_MS = 10 * 60 * 1000, HON_FUERA_MS = 2 * 60 * 1000;
 
   function bloquearHon(msg) {
@@ -989,7 +991,10 @@
     return p && p.url ? p.url.replace(/[?#].*$/, '') + '#gid=' + p.gid + '&range=A' + r : '';
   }
 
-  function cargarHonorarios() {
+  /** Hay un formulario abierto en Honorarios (Anotar, Escrito, Formulario RH…): una recarga automática no lo borra. */
+  function honEditando() { return !!$('honorarios').querySelector('.area-accion form, .area-accion .form-hon'); }
+
+  function cargarHonorarios(silencioso) {
     if (!estado.cfg || hon.cargando) return;
     if (!hon.pin) { pintarPin(); return; }
     hon.cargando = true;
@@ -997,10 +1002,15 @@
     apiPost({ a: 'honorarios', pin: hon.pin }).then(function (d) {
       hon.cargando = false;
       if (!hon.pin) return;                                    // se bloqueó mientras cargaba
+      // Un formulario recién pedido puede no estar todavía en lo que llegó: no se pierde.
+      d.formularios = d.formularios || [];
+      ((hon.datos && hon.datos.formularios) || []).forEach(function (x) { if (!d.formularios.some(function (y) { return y.job === x.job; })) d.formularios.push(x); });
       hon.datos = d;
       actualizarBtnHon();
-      if (estado.vista === 'honorarios') pintarHonorarios();
-      if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios' && hon.pin) cargarHonorarios(); }, 30000);
+      if (estado.vista === 'honorarios' && !(silencioso && honEditando())) pintarHonorarios();
+      else refrescarGenerados();
+      seguirFormRH();
+      if (d.sae && d.sae.enCurso) setTimeout(function () { if (estado.vista === 'honorarios' && hon.pin) cargarHonorarios(true); }, 30000);
     }).catch(function (e) {
       hon.cargando = false;
       var m = String(e.message || e);
@@ -1030,6 +1040,22 @@
       cont.appendChild(pe);
     }
 
+    // Tarjetas: una por sección (como en Para firmar y Agenda). Al abrir una, se ve solo esa sección.
+    var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
+    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar' };
+    if (hon.grupo && nombres[hon.grupo]) {
+      cont.appendChild(h('div', { class: 'cabecera-grupo' },
+        h('button', { class: 'btn', type: 'button', onclick: function () { abrirGrupoHon(null); } }, '← Tarjetas'),
+        h('h2', { text: nombres[hon.grupo] })));
+      if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
+      else if (hon.grupo === 'escritos') { cont.appendChild(panelEscritoHon()); cont.appendChild(h('div', { id: 'hon-generados' })); refrescarGenerados(); }
+      else if (hon.grupo === 'cobrado') pintarCobradoMes(cont, m);
+      else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
+      else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
+      cont.appendChild(h('div', { class: 'pie-grupo' }, h('button', { class: 'btn', type: 'button', onclick: function () { abrirGrupoHon(null); } }, '← Volver a las tarjetas')));
+      return;
+    }
+
     // Resumen + SAE
     var p = d.pendientes;
     var infoSae = d.sae.enCurso ? 'Consultando el SAE…' + (d.sae.quedan ? ' quedan ' + d.sae.quedan : '')
@@ -1053,32 +1079,26 @@
         h('button', { class: 'btn', type: 'button', onclick: function () { hon.verDatosPago = !hon.verDatosPago; pintarHonorarios(); } }, 'Datos para transferencia')),
       hon.verDatosPago ? formDatosPago(d.datosPago || {}) : null));
 
-    // Tarjetas: una por sección (como en Para firmar y Agenda)
-    var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
     var problemasFact = F && !F.error && (F.sinFactura.length || F.sinCobro.length || F.diferencias.length);
+    var forms = d.formularios || [], armando = forms.filter(function (x) { return x.estado === 'EN_COLA'; }).length;
+    var sinAnotar = forms.filter(function (x) { return x.estado === 'LISTO' && !anotadoTodo(x); }).length + hon.generados.filter(function (x) { return !anotadoTodo(x); }).length;
     var datosTarjeta = {
       semana: { numero: L ? L.cantidad : 0, unidad: 'pendientes', info: L ? [importe(L.total), 'Tramitados: ' + L.tramitados + ' de ' + L.cantidad] : ['Se arma el domingo a la noche'] },
-      escritos: { info: ['Orden de pago, embargo, planilla y regulación', 'Formulario del Registro (Res. 546)'] },
+      escritos: { info: ['Orden de pago, embargo, planilla y regulación', 'Formulario del Registro (Res. 546)', forms.length ? 'Formularios de la semana: ' + forms.length : ''],
+                  alerta: armando ? 'Armando ' + (armando === 1 ? '1 formulario…' : armando + ' formularios…') : sinAnotar ? sinAnotar + ' para anotar en las planillas' : '' },
       cobrado: { numero: importe(m.total), unidad: '', info: [m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros')],
                  alerta: problemasFact || m.enTexto.length ? '⚠ Hay algo para verificar' : '' },
       tramitados: { numero: d.semana.lista.length, unidad: 'la semana pasada', info: ['Agosto – octubre: ' + d.primer.lista.length] },
       revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] }
     };
-    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar' };
     var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
     Object.keys(nombres).forEach(function (id) {
-      tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: nombres[id], abierta: hon.grupo === id,
-        onclick: function () { hon.grupo = hon.grupo === id ? null : id; guardar(LS.honGrupo, hon.grupo); pintarHonorarios(); } }, datosTarjeta[id])));
+      tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: nombres[id], abierta: false, entrar: true, onclick: function () { abrirGrupoHon(id); } }, datosTarjeta[id])));
     });
     cont.appendChild(tarjetas);
-
-    if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
-    else if (hon.grupo === 'escritos') cont.appendChild(panelEscritoHon());
-    else if (hon.grupo === 'cobrado') pintarCobradoMes(cont, m);
-    else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
-    else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
-    else cont.appendChild(h('p', { class: 'ayuda chica', style: 'text-align:center', text: 'Tocá una tarjeta para ver su contenido.' }));
   }
+
+  function abrirGrupoHon(id) { hon.grupo = id; pintarHonorarios(); window.scrollTo(0, 0); }
 
   // Cobrado el mes anterior (reporte mensual) y facturas del mes
   function pintarCobradoMes(cont, m) {
@@ -1340,7 +1360,7 @@
     } else if (tipo === 'formulario') {
       formularioRH(area, x);
     } else if (tipo === 'escrito') {
-      area.appendChild(formEscritoHon({ e: x.e, d: x.d, saldo: x.saldo != null ? x.saldo : x.monto }));
+      area.appendChild(formEscritoHon({ e: x.e, d: x.d, r: x.r, saldo: x.saldo != null ? x.saldo : x.monto }));
     }
   }
 
@@ -1358,7 +1378,7 @@
     return { input: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etiqueta }), i) };
   }
 
-  /** @param j {e, d, saldo} el juicio */
+  /** @param j {e, d, r, saldo} el juicio (r: su fila en HONORARIOS, si se conoce) */
   function formEscritoHon(j) {
     var f = h('form', { class: 'form-hon' });
     var sel = h('select', { class: 'campo-form', 'aria-label': 'Tipo de escrito' }, TIPOS_ESCRITO_HON.map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
@@ -1421,11 +1441,16 @@
       apiPost({ a: 'honEscrito', pin: hon.pin, tipo: sel.value, e: j.e, datos: leer(), forzar: !!forzar }).then(function (r) {
         boton.disabled = false; resultado.textContent = '';
         aviso('Escrito generado');
+        var g = { tipo: 'escrito', titulo: sel.options[sel.selectedIndex].text, e: r.escrito.e, d: r.escrito.d, r: j.r, url: r.escrito.url, pdfId: r.escrito.pdfId,
+                  texto: r.seguimiento || '', creado: Date.now(), anotado: null };
+        hon.generados.unshift(g);
+        refrescarGenerados();
         resultado.appendChild(h('div', { class: 'form-hon' }, h('b', { text: '✓ Escrito generado: quedó en Para firmar' }),
           r.arca ? h('div', { class: 'ayuda chica', text: 'En menos de un minuto se le une la constancia de ARCA.' }) : null,
           r.aviso ? h('div', { class: 'alerta', text: r.aviso }) : null,
           h('div', { class: 'botones-hon' }, h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
-            h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'))));
+            h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar')),
+          panelActualizar(g)));
       }).catch(function (e) {
         boton.disabled = false; resultado.textContent = '';
         resultado.appendChild(h('div', { class: 'alerta', text: traducirError(e) }));
@@ -1451,7 +1476,7 @@
       var area = h('div', { class: 'area-accion' });
       var saldo = hon.datos && hon.datos.listado && [].concat(hon.datos.listado.grupos.CUOTA, hon.datos.listado.grupos.PRIORIDAD, hon.datos.listado.grupos.RESTO)
         .filter(function (y) { return y.e === x.e; })[0];
-      var j = { e: x.e, d: x.d, saldo: saldo ? (saldo.saldo != null ? saldo.saldo : saldo.monto) : null };
+      var j = { e: x.e, d: x.d, r: saldo ? saldo.r : null, saldo: saldo ? (saldo.saldo != null ? saldo.saldo : saldo.monto) : null };
       caja.appendChild(h('div', { class: 'item-rev' }, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e + (x.g ? ' · ' + x.g : '') }),
         h('div', { class: 'botones-hon' },
           h('button', { class: 'btn primario', type: 'button', onclick: function () { accion(area, 'escrito', j, hon.datos); } }, 'Escrito'),
@@ -1468,8 +1493,8 @@
           h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e + ' · ' + (x.g || '') })));
       });
     });
-    return h('div', { class: 'panel' }, h('h2', { text: 'Escritos y Formulario RH' }),
-      h('p', { class: 'ayuda chica', text: 'Buscá el juicio y elegí: "Escrito" (orden de pago, embargo, planilla o regulación) o "Formulario RH" (Registro de Honorarios, Res. 546). Los escritos quedan en Para firmar → Honorarios y otros. También están en cada juicio del listado de la semana.' }),
+    return h('div', { class: 'panel' },
+      h('p', { class: 'ayuda chica', text: 'Buscá el juicio y elegí: "Escrito" (orden de pago, embargo, planilla o regulación) o "Formulario RH" (Registro de Honorarios, Res. 546). Los escritos quedan en Para firmar → Honorarios y otros; lo generado queda abajo, en "Generados esta semana". También están en cada juicio del listado de la semana.' }),
       inp, lista, caja);
   }
 
@@ -1477,13 +1502,14 @@
   var CAMPOS_RH = [['juicio', 'Juicio', 2], ['expediente', 'Expediente', 1], ['juzgado', 'Juzgado o tribunal', 2],
                    ['regulacion', 'Sentencia de regulación de honorarios', 7], ['documentos', 'Documentos que acreditan la satisfacción', 3],
                    ['fondo', 'Sentencia de fondo', 8], ['observaciones', 'Observaciones', 7]];
-  var formRH = null;   // pedido en curso (para volver a preguntar al regresar a la app)
+  var formRH = { timer: null, vistas: {} };   // vistas[job]: dónde se pidió el formulario (para mostrar ahí el resultado si sigue en pantalla)
 
   function formularioRH(area, x) {
     area.appendChild(h('div', { class: 'form-hon' }, h('div', { class: 'ayuda chica', text: 'Buscando las sentencias en el SAE y el IVP en tu Gmail: puede tardar hasta un minuto…' })));
     apiPost({ a: 'honFormDatos', pin: hon.pin, e: x.e, d: x.d }).then(function (r) {
       if (area.dataset.tipo !== 'formulario') return;
       area.textContent = '';
+      r.r = x.r;
       pintarFormularioRH(area, r);
     }).catch(function (e) {
       if (area.dataset.tipo !== 'formulario') return;
@@ -1539,9 +1565,11 @@
       if (!confirm('¿Generar el formulario de ' + r.d + ' (' + r.e + ') con tu firma y sello?\n\nMonto a percibir: $ ' + montoATexto(n) + '\n\nQueda guardado en el Drive; lo presentás vos.')) return;
       boton.disabled = true;
       resultado.textContent = '';
-      resultado.appendChild(h('div', { class: 'ayuda chica', text: 'Armando el PDF: 1 o 2 minutos. Podés seguir usando la app.' }));
-      apiPost({ a: 'honFormPedir', pin: hon.pin, e: r.e, d: r.d, campos: datos, ivpPdf: r.ivp.pdf }).then(function (p) {
-        formRH = { job: p.job, resultado: resultado, boton: boton, timer: null };
+      resultado.appendChild(h('div', { class: 'ayuda chica', text: 'Armando el PDF: 1 o 2 minutos. Podés seguir usando la app: cuando esté listo lo vas a encontrar en Honorarios → Escritos y Formulario RH → "Generados esta semana".' }));
+      apiPost({ a: 'honFormPedir', pin: hon.pin, e: r.e, d: r.d, r: r.r || '', campos: datos, ivpPdf: r.ivp.pdf }).then(function (p) {
+        if (hon.datos) (hon.datos.formularios = hon.datos.formularios || []).unshift({ job: p.job, e: r.e, d: r.d, r: r.r || '', creado: Date.now(), estado: 'EN_COLA', anotado: null });
+        formRH.vistas[p.job] = { resultado: resultado, boton: boton };
+        refrescarGenerados();
         seguirFormRH();
       }).catch(function (e) { boton.disabled = false; resultado.textContent = ''; resultado.appendChild(h('div', { class: 'alerta', text: 'No se pudo: ' + traducirError(e) })); });
     });
@@ -1555,27 +1583,105 @@
     });
   }
 
+  /** Pregunta cada 5 segundos por los formularios que se están armando (aunque se haya cambiado de pestaña). */
   function seguirFormRH(ya) {
-    var F = formRH;
-    if (!F || !hon.pin) return;
-    clearTimeout(F.timer);
-    F.timer = setTimeout(function () {
-      apiPost({ a: 'honFormEstado', pin: hon.pin, j: F.job }).then(function (r) {
-        if (formRH !== F) return;
-        if (r.estado === 'EN_COLA') { seguirFormRH(); return; }
-        formRH = null;
-        F.boton.disabled = false;
-        F.resultado.textContent = '';
-        if (r.estado === 'ERROR') { F.resultado.appendChild(h('div', { class: 'alerta', text: r.error })); return; }
-        aviso('Formulario listo');
-        F.resultado.appendChild(h('div', { class: 'form-hon' },
-          h('b', { text: '✓ ' + r.nombre }),
-          h('div', { class: 'botones-hon' },
-            h('a', { class: 'btn primario', href: r.url, target: '_blank', rel: 'noopener' }, 'Abrir formulario'),
-            h('a', { class: 'btn', href: r.carpeta, target: '_blank', rel: 'noopener' }, 'Abrir carpeta')),
-          h('div', { class: 'ayuda chica', text: (r.ivpCopiado ? 'El IVP ya está en la carpeta. ' : 'Agregá el PDF del IVP a la carpeta. ') + 'Falta el PDF de la sentencia: el SAE solo entrega el texto, así que hay que bajarlo del portal y guardarlo ahí.' })));
-      }).catch(function () { seguirFormRH(); });
+    clearTimeout(formRH.timer);
+    var pend = ((hon.datos && hon.datos.formularios) || []).filter(function (x) { return x.estado === 'EN_COLA'; });
+    if (!hon.pin || !pend.length) return;
+    formRH.timer = setTimeout(function () {
+      Promise.all(pend.map(function (x) {
+        return apiPost({ a: 'honFormEstado', pin: hon.pin, j: x.job }).then(function (r) {
+          if (r.estado === 'EN_COLA') return;
+          Object.assign(x, { estado: r.estado, url: r.url, carpeta: r.carpeta, nombre: r.nombre, ivpCopiado: r.ivpCopiado, error: r.error });
+          aviso(r.estado === 'LISTO' ? 'Formulario listo: ' + x.d : 'No se pudo armar el formulario de ' + x.d);
+          var v = formRH.vistas[x.job];
+          delete formRH.vistas[x.job];
+          if (v && document.body.contains(v.resultado)) { v.boton.disabled = false; v.resultado.textContent = ''; v.resultado.appendChild(resultadoFormRH(x)); }
+        }).catch(function (e) {
+          if (/no encontrado/i.test(String(e.message))) { x.estado = 'ERROR'; x.error = 'El pedido ya no está en el servidor: generalo de nuevo.'; }
+        });
+      })).then(function () { refrescarGenerados(); seguirFormRH(); });
     }, ya ? 0 : 5000);
+  }
+
+  function resultadoFormRH(x) {
+    if (x.estado === 'EN_COLA') return h('div', { class: 'ayuda chica', text: 'Armando el PDF… (1 o 2 minutos)' });
+    if (x.estado === 'ERROR') return h('div', { class: 'alerta', text: x.error || 'No se pudo armar el formulario.' });
+    if (!x.texto) x.texto = 'PRESENTO EN EL REGISTRO DE HONORARIOS.';
+    return h('div', { class: 'form-hon' },
+      h('b', { text: '✓ ' + x.nombre }),
+      h('div', { class: 'botones-hon' },
+        h('a', { class: 'btn primario', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir formulario'),
+        h('a', { class: 'btn', href: x.carpeta, target: '_blank', rel: 'noopener' }, 'Abrir carpeta')),
+      h('div', { class: 'ayuda chica', text: (x.ivpCopiado ? 'El IVP ya está en la carpeta. ' : 'Agregá el PDF del IVP a la carpeta. ') + 'Falta el PDF de la sentencia: el SAE solo entrega el texto, así que hay que bajarlo del portal y guardarlo ahí.' }),
+      panelActualizar(x));
+  }
+
+  // ───────── Generados esta semana: escritos (de esta sesión) y formularios RH (del servidor, 7 días) ─────────
+  function anotadoTodo(x) { return !!(x.anotado && x.anotado.maestro && x.anotado.honorarios); }
+
+  function refrescarGenerados() {
+    var cont = $('hon-generados');
+    if (!cont) return;
+    cont.textContent = '';
+    var forms = ((hon.datos && hon.datos.formularios) || []).map(function (x) { return { tipo: 'formulario', x: x, creado: x.creado }; });
+    var lista = hon.generados.map(function (x) { return { tipo: 'escrito', x: x, creado: x.creado }; }).concat(forms)
+      .sort(function (a, b) { return b.creado - a.creado; });
+    if (!lista.length) return;
+    cont.appendChild(h('div', { class: 'anio' }, 'Generados esta semana', h('small', { text: String(lista.length) })));
+    lista.forEach(function (g) {
+      var x = g.x, cuando = new Date(x.creado).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      var item = h('div', { class: 'item-rev' + (anotadoTodo(x) ? ' tramitado' : '') },
+        h('div', { class: 'fila-panel' }, h('b', { text: x.d }), h('span', { class: 'chip-tipo' + (g.tipo === 'formulario' ? ' cancela' : ''), text: g.tipo === 'formulario' ? 'FORMULARIO RH' : x.titulo.toUpperCase() })),
+        h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · ' + cuando }),
+        g.tipo === 'formulario' ? resultadoFormRH(x)
+          : h('div', null, h('div', { class: 'botones-hon' }, h('a', { class: 'btn', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+              h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar')), panelActualizar(x)));
+      cont.appendChild(item);
+    });
+  }
+
+  /** "¿Actualizar el MAESTRO y HONORARIOS?": una línea con la fecha de hoy en el SEGUIMIENTO y en el TRAMITE PENDIENTE (con confirmación). */
+  function panelActualizar(x) {
+    var a = x.anotado || {};
+    var hecho = function () {
+      var l = [];
+      if (a.maestro) l.push(h('div', { class: 'ayuda chica', text: '✓ MAESTRO: ' + a.maestro }));
+      if (a.honorarios) l.push(h('div', { class: 'ayuda chica', text: '✓ HONORARIOS: ' + a.honorarios }));
+      return l;
+    };
+    if (a.maestro && a.honorarios) return h('div', { class: 'actualizar-hon hecho' }, hecho());
+    var ta = h('textarea', { class: 'campo-form', rows: '2', 'aria-label': 'Texto para las planillas' });
+    ta.value = x.texto || '';
+    var cm = h('input', { type: 'checkbox', checked: !a.maestro, disabled: !!a.maestro, 'aria-label': 'MAESTRO' });
+    var ch = h('input', { type: 'checkbox', checked: !a.honorarios, disabled: !!a.honorarios, 'aria-label': 'HONORARIOS' });
+    var msg = h('div');
+    var boton = h('button', { class: 'btn primario', type: 'button' }, 'Actualizar planillas');
+    var caja = h('div', { class: 'actualizar-hon' },
+      h('b', { text: '¿Actualizar el MAESTRO y HONORARIOS?' }),
+      h('div', { class: 'ayuda chica', text: 'Se agrega una línea con la fecha de hoy. Corregí el texto si hace falta.' + (x.pdfId ? ' Si lo anotás ahora, al marcarlo "Presentado" en Para firmar no se repite en el MAESTRO.' : '') }),
+      hecho(), ta,
+      h('label', { class: 'check-hon' }, cm, ' MAESTRO (SEGUIMIENTO)' + (a.maestro ? ' · ya anotado' : '')),
+      h('label', { class: 'check-hon' }, ch, ' HONORARIOS (TRAMITE PENDIENTE)' + (a.honorarios ? ' · ya anotado' : '')),
+      boton, msg);
+    boton.addEventListener('click', function () {
+      var texto = ta.value.replace(/\s+/g, ' ').trim().toUpperCase(), aM = cm.checked && !a.maestro, aH = ch.checked && !a.honorarios;
+      if (texto.length < 3) { aviso('Escribí el texto'); ta.focus(); return; }
+      if (!aM && !aH) { aviso('Elegí qué planilla actualizar'); return; }
+      if (!confirm('Se agrega en ' + (aM && aH ? 'el MAESTRO y en HONORARIOS' : aM ? 'el MAESTRO' : 'HONORARIOS') + ' (' + x.d + ', ' + x.e + '):\n\n- ' + isoADmy(hoyInput()) + ': ' + texto)) return;
+      boton.disabled = true; msg.textContent = '';
+      apiPost({ a: 'honActualizar', pin: hon.pin, e: x.e, r: x.r || '', texto: texto, maestro: aM, honorarios: aH, pdfId: x.pdfId || '', job: x.job || '' }).then(function (r) {
+        x.texto = texto;
+        x.anotado = { maestro: a.maestro || r.maestro, honorarios: a.honorarios || r.honorarios };
+        var nuevo = panelActualizar(x);
+        caja.replaceWith(nuevo);
+        (r.avisos || []).forEach(function (t) { nuevo.appendChild(h('div', { class: 'alerta', text: t })); });
+        aviso(r.maestro && r.honorarios ? 'Anotado en el MAESTRO y en HONORARIOS' : r.maestro ? 'Anotado en el MAESTRO' : r.honorarios ? 'Anotado en HONORARIOS' : 'No se anotó');
+        if (r.maestro) refrescar(true);
+        if (r.honorarios) cargarHonorarios(true);
+      }).catch(function (e) { boton.disabled = false; msg.appendChild(h('div', { class: 'alerta', text: 'No se pudo: ' + traducirError(e) })); });
+    });
+    return caja;
   }
   document.addEventListener('visibilitychange', function () { if (!document.hidden) seguirFormRH(true); });
 
