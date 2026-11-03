@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmarGrupo: 'jdgr.firmarGrupo' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -531,7 +531,23 @@
   }
 
   // ───────── Para firmar (motor de escritos) ─────────
-  var firmar = { datos: null, sel: {}, cargando: false, lote: null };
+  var firmar = { datos: null, sel: {}, cargando: false, lote: null, grupo: leer(LS.firmarGrupo) };
+
+  // Una tarjeta por tipo de escrito; al tocarla se abren sus escritos (como los botones del portal del SAE).
+  var GRUPOS_FIRMAR = [
+    { id: 'sentencia', nombre: 'Pedidos de sentencia', es: function (x) { return /SENTENCIA/.test(x.tipo) && !/^COMUNICO/.test(x.tipo); } },
+    { id: 'ivp', nombre: 'Cancelaciones (IVP)', es: function (x) { return /^COMUNICO/.test(x.tipo); } },
+    { id: 'otros', nombre: 'Honorarios y otros', es: function () { return true; } }
+  ];
+  function grupoFirmar(x) { return GRUPOS_FIRMAR.filter(function (g) { return g.es(x); })[0].id; }
+
+  // Al cambiar de tarjeta se destilda todo: así nunca se marca como presentado un escrito que no está a la vista.
+  function abrirGrupoFirmar(id) {
+    firmar.grupo = id;
+    guardar(LS.firmarGrupo, id);
+    firmar.sel = {};
+    pintarFirmar();
+  }
 
   function imprimirLote() {
     var ids = Object.keys(firmar.sel);
@@ -644,21 +660,6 @@
       cont.appendChild(pe);
     }
 
-    // Estado del análisis
-    var info = d.enCurso ? 'Analizando la cartera…' + (d.quedan ? ' quedan ' + d.quedan + ' juicios' : '')
-                         : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite todos los domingos' : 'Todavía no se analizó la cartera');
-    var btnAnalizar = h('button', { class: 'btn', type: 'button', disabled: d.enCurso }, d.enCurso ? 'Analizando…' : 'Analizar ahora');
-    btnAnalizar.addEventListener('click', function () {
-      btnAnalizar.disabled = true;
-      api({ a: 'analizar' }).then(function () { aviso('Análisis en marcha: tarda unos minutos'); setTimeout(cargarFirmar, 3000); })
-        .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
-    });
-    cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
-      h('div', null, h('h2', { text: 'Pedidos de sentencia (todos los domingos)' }), h('div', { class: 'ayuda chica', text: info })),
-      btnAnalizar),
-      h('div', { class: 'ayuda chica', style: 'display:flex;gap:14px;flex-wrap:wrap' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }),
-        d.porFirmar.length ? h('a', { href: '#', onclick: function (ev) { ev.preventDefault(); Impresion.paraFirmar(d.porFirmar); }, text: 'Imprimir lista para firmar' }) : null)));
-
     // "Imprimir juntos": PDF único con los escritos seleccionados
     if (firmar.lote) {
       var L = firmar.lote;
@@ -671,18 +672,73 @@
            Date.now() - L.desde > 180000 && L.carpeta ? h('div', null, h('a', { href: L.carpeta, target: '_blank', rel: 'noopener', text: 'Tarda más de lo normal: abrir la carpeta PARA IMPRIMIR en el Drive ↗' })) : null]));
     }
 
-    // IVP de Gmail → comunicaciones de cancelación
-    var infoIvp = d.revisandoIvp ? 'Revisando los IVP de Gmail…'
-                 : (d.ultimoIvp ? 'Última revisión: ' + new Date(d.ultimoIvp).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · todos los días'
-                                : 'Todavía no se revisaron los IVP');
-    var btnIvp = h('button', { class: 'btn', type: 'button', disabled: d.revisandoIvp }, d.revisandoIvp ? 'Revisando…' : 'Revisar IVP ahora');
-    btnIvp.addEventListener('click', function () {
-      btnIvp.disabled = true;
-      api({ a: 'revisarIvp' }).then(function () { aviso('Revisando los IVP: tarda unos minutos'); setTimeout(cargarFirmar, 5000); })
-        .catch(function (e) { btnIvp.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+    // Tarjetas: una por tipo de escrito
+    var grupos = {};
+    GRUPOS_FIRMAR.forEach(function (g) { grupos[g.id] = []; });
+    d.porFirmar.forEach(function (x) { grupos[grupoFirmar(x)].push(x); });
+    var abierto = firmar.grupo && (firmar.grupo !== 'otros' || grupos.otros.length) ? firmar.grupo : null;
+    var cuando = function (iso) { return new Date(iso).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' }); };
+    var info = {
+      sentencia: d.enCurso ? 'Analizando…' : d.ultimaCorrida ? 'Análisis del ' + cuando(d.ultimaCorrida) : 'Sin analizar',
+      ivp: d.revisandoIvp ? 'Revisando Gmail…' : d.ultimoIvp ? 'Gmail revisado el ' + cuando(d.ultimoIvp) : 'Sin revisar',
+      otros: 'Desde Honorarios'
+    };
+    var tarjetas = h('div', { class: 'tarjetas-firmar' });
+    GRUPOS_FIRMAR.forEach(function (g) {
+      if (g.id === 'otros' && !grupos.otros.length) return;
+      var n = grupos[g.id].length;
+      var falta = g.id === 'sentencia' && d.arca && !d.arca.alDia ? '⚠ Falta la constancia de ARCA'
+                : g.id === 'sentencia' && d.revision.length ? d.revision.length + ' en revisión manual' : '';
+      var b = h('button', { type: 'button', class: 'tarjeta-firmar' + (abierto === g.id ? ' abierta' : '') + (n ? '' : ' vacia'), 'aria-expanded': abierto === g.id ? 'true' : 'false' },
+        h('span', { class: 'tf-nombre', text: g.nombre }),
+        h('span', { class: 'tf-cuenta' }, h('b', { text: String(n) }), ' para firmar'),
+        h('span', { class: 'tf-info', text: info[g.id] }),
+        falta ? h('span', { class: 'tf-info' + (/ARCA/.test(falta) ? ' tf-alerta' : ''), text: falta }) : null,
+        h('span', { class: 'tf-abrir', text: abierto === g.id ? 'Cerrar ▴' : 'Abrir ▾' }));
+      b.addEventListener('click', function () { abrirGrupoFirmar(abierto === g.id ? null : g.id); });
+      tarjetas.appendChild(b);
+    });
+    cont.appendChild(tarjetas);
+
+    if (abierto === 'sentencia') seccionSentencia(cont, d, grupos.sentencia);
+    else if (abierto === 'ivp') seccionIvp(cont, d, grupos.ivp);
+    else if (abierto === 'otros') seccionOtrosFirmar(cont, d, grupos.otros);
+    else cont.appendChild(h('p', { class: 'ayuda chica', style: 'text-align:center', text: 'Tocá una tarjeta para ver sus escritos.' }));
+    actualizarBarraAcciones();
+  }
+
+  // Escritos de una tarjeta, por año del juicio, con "Tildar todos".
+  function escritosPorAnio(cont, lista, vacio) {
+    if (!lista.length) {
+      cont.appendChild(h('div', { class: 'vacio' }, h('h2', { text: 'No hay escritos para firmar' }), h('p', { text: vacio })));
+      return;
+    }
+    var todos = lista.every(function (x) { return firmar.sel[x.id]; });
+    cont.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 0' },
+      h('button', { class: 'btn', type: 'button', onclick: function () {
+        lista.forEach(function (x) { if (todos) delete firmar.sel[x.id]; else firmar.sel[x.id] = true; });
+        pintarFirmar();
+      } }, todos ? 'Destildar todos' : 'Tildar todos (' + lista.length + ')'),
+      h('button', { class: 'btn', type: 'button', onclick: function () { Impresion.paraFirmar(lista); } }, 'Imprimir lista para firmar')));
+    porAnio(lista).forEach(function (g) {
+      cont.appendChild(h('div', { class: 'anio' }, 'Juicios ' + g.anio, h('small', { text: g.items.length + (g.items.length === 1 ? ' escrito' : ' escritos') })));
+      g.items.forEach(function (x) { cont.appendChild(tarjetaEscrito(x)); });
+    });
+  }
+
+  function seccionSentencia(cont, d, lista) {
+    var info = d.enCurso ? 'Analizando la cartera…' + (d.quedan ? ' quedan ' + d.quedan + ' juicios' : '')
+                         : (d.ultimaCorrida ? 'Último análisis: ' + new Date(d.ultimaCorrida).toLocaleDateString('es-AR') + ' · se repite todos los domingos' : 'Todavía no se analizó la cartera');
+    var btnAnalizar = h('button', { class: 'btn', type: 'button', disabled: d.enCurso }, d.enCurso ? 'Analizando…' : 'Analizar ahora');
+    btnAnalizar.addEventListener('click', function () {
+      btnAnalizar.disabled = true;
+      api({ a: 'analizar' }).then(function () { aviso('Análisis en marcha: tarda unos minutos'); setTimeout(cargarFirmar, 3000); })
+        .catch(function (e) { btnAnalizar.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
     });
     cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
-      h('div', null, h('h2', { text: 'Cancelaciones (IVP)' }), h('div', { class: 'ayuda chica', text: infoIvp })), btnIvp)));
+      h('div', null, h('h2', { text: 'Pedidos de sentencia (todos los domingos)' }), h('div', { class: 'ayuda chica', text: info })),
+      btnAnalizar),
+      h('div', { class: 'ayuda chica' }, h('a', { href: d.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir la carpeta de escritos ↗' }))));
 
     // Constancia de ARCA del mes
     if (d.arca && !d.arca.alDia) {
@@ -691,7 +747,7 @@
         h('div', { text: 'Bajala de ARCA y guardala en la carpeta CONSTANCIA ARCA: cada pedido de sentencia se sube junto con ella.' }),
         h('div', { style: 'margin-top:6px' }, h('a', { href: d.arca.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir carpeta CONSTANCIA ARCA ↗' }))));
     } else if (d.arca && d.arca.archivo) {
-      var sinArca = d.porFirmar.filter(function (x) { return !x.arca; }).length;
+      var sinArca = d.porFirmar.filter(function (x) { return !x.arca && grupoFirmar(x) !== 'ivp'; }).length;
       var panelArca = h('div', { class: 'panel ok-arca' }, '✓ Constancia de ARCA de ' + d.arca.mes.toLowerCase() + ': ',
         h('a', { href: d.arca.archivo.url, target: '_blank', rel: 'noopener', text: d.arca.archivo.nombre }));
       if (d.uniendoArca) panelArca.appendChild(h('div', { class: 'ayuda chica', text: 'Uniendo la constancia a los escritos… (unos minutos)' }));
@@ -707,15 +763,7 @@
       cont.appendChild(panelArca);
     }
 
-    // Escritos para firmar, por año del juicio
-    if (!d.porFirmar.length) {
-      cont.appendChild(h('div', { class: 'vacio' }, h('h2', { text: 'No hay escritos para firmar' }),
-        h('p', { text: d.enCurso ? 'Esperá a que termine el análisis.' : 'El próximo análisis los va a generar si corresponde.' })));
-    }
-    porAnio(d.porFirmar).forEach(function (g) {
-      cont.appendChild(h('div', { class: 'anio' }, 'Juicios ' + g.anio, h('small', { text: g.items.length + (g.items.length === 1 ? ' escrito' : ' escritos') })));
-      g.items.forEach(function (x) { cont.appendChild(tarjetaEscrito(x)); });
-    });
+    escritosPorAnio(cont, lista, d.enCurso ? 'Esperá a que termine el análisis.' : 'El próximo análisis los va a generar si corresponde.');
 
     // Revisión manual
     if (d.revision.length) {
@@ -761,7 +809,28 @@
       det2.appendChild(h('div', { class: 'botones' }, btn));
       cont.appendChild(det2);
     }
-    actualizarBarraAcciones();
+  }
+
+  // IVP de Gmail → comunicaciones de cancelación
+  function seccionIvp(cont, d, lista) {
+    var infoIvp = d.revisandoIvp ? 'Revisando los IVP de Gmail…'
+                 : (d.ultimoIvp ? 'Última revisión: ' + new Date(d.ultimoIvp).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) + ' · todos los días'
+                                : 'Todavía no se revisaron los IVP');
+    var btnIvp = h('button', { class: 'btn', type: 'button', disabled: d.revisandoIvp }, d.revisandoIvp ? 'Revisando…' : 'Revisar IVP ahora');
+    btnIvp.addEventListener('click', function () {
+      btnIvp.disabled = true;
+      api({ a: 'revisarIvp' }).then(function () { aviso('Revisando los IVP: tarda unos minutos'); setTimeout(cargarFirmar, 5000); })
+        .catch(function (e) { btnIvp.disabled = false; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    cont.appendChild(h('div', { class: 'panel' }, h('div', { class: 'fila-panel' },
+      h('div', null, h('h2', { text: 'Cancelaciones (IVP)' }), h('div', { class: 'ayuda chica', text: infoIvp })), btnIvp)));
+    escritosPorAnio(cont, lista, 'Cuando llegue un IVP a Gmail, la comunicación aparece acá.');
+  }
+
+  function seccionOtrosFirmar(cont, d, lista) {
+    cont.appendChild(h('div', { class: 'panel' }, h('h2', { text: 'Honorarios y otros' }),
+      h('div', { class: 'ayuda chica', text: 'Escritos generados desde la pestaña Honorarios.' })));
+    escritosPorAnio(cont, lista, 'No hay escritos de este tipo.');
   }
 
   function tarjetaEscrito(x) {
@@ -772,7 +841,7 @@
       h('div', { class: 'meta' },
         h('span', { class: 'expte', text: 'Expte. ' + x.e }),
         h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : /^COMUNICO/.test(x.tipo) ? ' cancela' : ''),
-                    text: /REITERO/.test(x.tipo) ? 'REITERO' : /^COMUNICO/.test(x.tipo) ? x.tipo.replace(/ DE LA DEUDA/, '') : 'PIDO SENTENCIA' }),
+                    text: /REITERO/.test(x.tipo) ? 'REITERO' : /^COMUNICO/.test(x.tipo) ? x.tipo.replace(/ DE LA DEUDA/, '') : /SENTENCIA/.test(x.tipo) ? 'PIDO SENTENCIA' : x.tipo }),
         h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: x.arca ? (x.adjunto ? '📎 con IVP' : '📎 con ARCA') : (x.adjunto ? 'uniendo IVP…' : 'sin ARCA') }),
         x.nuevoEstado ? h('span', { class: 'ayuda chica', text: 'Al presentar: ESTADO → ' + x.nuevoEstado }) : null,
         h('span', { text: x.motivo })),
