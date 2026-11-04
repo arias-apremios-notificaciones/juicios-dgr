@@ -2003,8 +2003,12 @@
 
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
   var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' },
-                       { id: 'COMUNICO_IVP', nombre: 'Comunicación de cancelación (IVP)' }];
-  var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false };
+                       { id: 'COMUNICO_IVP', nombre: 'Comunicación de cancelación (IVP)' },
+                       // Modelos sellados de la carpeta MODELOS PARA LA APP (Modelos.js): título y cuerpo editables.
+                       { id: 'DEVUELVO_CEDULA_LEY', nombre: 'Devuelvo cédula ley diligenciada', modelo: true }];
+  // ed: el título y el cuerpo del modelo tal como los dejó Carlos (null = todavía sin tocar)
+  var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null };
+  function esModelo(tipo) { return TIPOS_ESCRITO.some(function (t) { return t.id === tipo && t.modelo; }); }
 
   var LECTURA_MOTOR = {
     PEDIR: ['ok', 'El motor también pediría sentencia'],
@@ -2344,7 +2348,7 @@
     var sel = h('select', { id: 'man-tipo', class: 'campo-form' });
     TIPOS_ESCRITO.forEach(function (t) { var o = h('option', { value: t.id, text: t.nombre }); if (t.id === manual.tipo) o.selected = true; sel.appendChild(o); });
     sel.addEventListener('change', function () {
-      manual.tipo = sel.value;
+      manual.tipo = sel.value; manual.ed = null;
       if (manual.fila) elegirJuicio(manual.fila);   // vuelve a consultar con el tipo nuevo
     });
     var inp = h('input', { id: 'man-expte', class: 'campo-form', type: 'search', inputmode: 'search', autocomplete: 'off', autocorrect: 'off',
@@ -2379,10 +2383,13 @@
     var inp = $('man-expte'); if (inp) inp.value = f.e;
     var lista = document.querySelector('.man-lista'); if (lista) lista.textContent = '';
     pintarEleccion();
-    api({ a: 'previa', e: f.e, t: manual.tipo }).then(function (p) {
-      if (manual.fila !== f) return;
+    var tipo = manual.tipo;
+    api({ a: 'previa', e: f.e, t: tipo }).then(function (p) {
+      if (manual.fila !== f || manual.tipo !== tipo) return;
+      if (p.ok && esModelo(tipo) && !p.modelo) {
+        manual.error = 'El servidor (Apps Script) todavía no tiene este modelo. Falta pegar el código nuevo y crear una "Nueva versión" en Implementar → Administrar implementaciones.';
       // Si Apps Script no tiene todavía el modo manual, responde solo con su versión.
-      if (p.ok && !p.motor) {
+      } else if (p.ok && !p.motor && !p.modelo) {
         manual.error = 'El servidor (Apps Script) todavía no tiene el modo manual. Falta pegar el código nuevo y crear una "Nueva versión" en Implementar → Administrar implementaciones.';
       } else manual.previa = p;
       pintarEleccion();
@@ -2421,12 +2428,13 @@
       caja.appendChild(h('div', { class: 'panel caja-ok' },
         h('b', { text: '✓ Escrito generado' }),
         esperando ? h('div', { class: 'cargando-txt', text: 'Uniendo la constancia de ARCA… (menos de un minuto)' })
-                  : h('div', { text: r.unido ? 'Listo: un solo PDF con el escrito y la constancia de ARCA. También está en Para firmar.'
+                  : h('div', { text: r.sinArca ? 'Listo. También está en Para firmar.'
+                                             : r.unido ? 'Listo: un solo PDF con el escrito y la constancia de ARCA. También está en Para firmar.'
                                              : 'Falta la constancia de ARCA del mes: guardala en su carpeta y se une sola.' }),
         h('div', { class: 'botones', style: 'margin-top:8px' },
           esperando ? null : h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
           h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'),
-          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; pintarEscritos(); } }, 'Otro escrito'))));
+          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; manual.ed = null; pintarEscritos(); } }, 'Otro escrito'))));
       return;
     }
     if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
@@ -2434,6 +2442,7 @@
 
     var p = manual.previa;
     if (!p.ok) { caja.appendChild(h('p', { class: 'error', text: p.error })); return; }
+    if (p.modelo) { pintarModelo(caja, tarjeta, f, p); return; }
     var lect = LECTURA_MOTOR[p.motor.decision] || ['aviso', p.motor.decision];
     if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', style: 'margin-top:6px', text: p.sae.caratula }));
     caja.appendChild(h('div', { class: 'panel caja-' + lect[0] },
@@ -2460,6 +2469,61 @@
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
         if (r.arca) esperarArca(r, 0);
       }).catch(function (e) { manual.generando = false; manual.error = traducirError(e); pintarEleccion(); });
+    });
+    caja.appendChild(h('div', { class: 'botones' }, btn));
+  }
+
+  /** Modelo sellado: encabezado, carátula y Nº salen del juicio; título y cuerpo se editan acá antes de generar. */
+  function pintarModelo(caja, tarjeta, f, p) {
+    var m = p.modelo;
+    if (!manual.ed) manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca };
+    var ed = manual.ed;
+    tarjeta.appendChild(h('div', { class: 'ayuda chica', style: 'margin-top:6px', text: p.encabezado }));
+    if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', text: p.sae.caratula }));
+    if (!p.sae.encontrado) caja.appendChild(h('div', { class: 'alerta', text: 'El expediente no se encontró en el SAE: el encabezado sale de la nominación del MAESTRO (OGA N° 1). Revisalo en el PDF.' }));
+    if (p.pendiente) caja.appendChild(h('div', { class: 'alerta', text: 'Ya hay un escrito de este expediente esperando firma (pestaña Para firmar).' }));
+
+    var titulo = h('textarea', { id: 'mod-titulo', class: 'campo-form', rows: '2' });   // en el teléfono el título largo no entra en un renglón
+    titulo.value = ed.titulo;
+    var cuerpo = h('textarea', { id: 'mod-cuerpo', class: 'campo-form', rows: '8' });
+    cuerpo.value = ed.cuerpo;
+    var arca = h('input', { type: 'checkbox', checked: ed.arca });
+    titulo.addEventListener('input', function () { ed.titulo = titulo.value; });
+    cuerpo.addEventListener('input', function () { ed.cuerpo = cuerpo.value; });
+    arca.addEventListener('change', function () { ed.arca = arca.checked; });
+
+    var agregados = Object.keys(m.agregados || {}).map(function (k) {
+      var ag = m.agregados[k];
+      return h('button', { class: 'btn', type: 'button', onclick: function () {
+        if (ed.titulo.toUpperCase().indexOf(ag.titulo) < 0) ed.titulo = ed.titulo.trim().replace(/[.\s]+$/, '') + '. ' + ag.titulo;
+        if (ed.cuerpo.indexOf(ag.cuerpo[0]) < 0) ed.cuerpo = ed.cuerpo.trim() + '\n\n' + ag.cuerpo.join('\n\n');
+        if (ag.arca) ed.arca = true;
+        pintarEleccion();
+      } }, ag.nombre);
+    });
+    var volver = h('button', { class: 'btn', type: 'button', onclick: function () { manual.ed = null; pintarEleccion(); } }, 'Volver al modelo');
+
+    caja.appendChild(h('div', { class: 'panel form-hon' },
+      h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' }), titulo,
+      h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' }), cuerpo,
+      h('label', { class: 'check-hon' }, arca, ' Unir la constancia de ARCA del mes'),
+      h('div', { class: 'botones', style: 'margin-top:8px' }, agregados, volver),
+      h('p', { class: 'ayuda chica', text: 'Encabezado, carátula, comparecencia y cierre los pone el sistema. Los cambios valen solo para este escrito: el modelo queda como está.' })));
+
+    var btn = h('button', { class: 'btn primario', type: 'button', disabled: manual.generando }, manual.generando ? 'Generando…' : 'Generar escrito');
+    btn.addEventListener('click', function () {
+      var parrafos = ed.cuerpo.split(/\n\s*\n/).map(function (x) { return x.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
+      if (!ed.titulo.trim()) { aviso('Falta el título del escrito'); titulo.focus(); return; }
+      if (!parrafos.length) { aviso('El cuerpo del escrito está vacío'); cuerpo.focus(); return; }
+      if (p.pendiente && !confirm('Ya hay un escrito para firmar de este expediente. ¿Generar igual?')) return;
+      manual.generando = true; pintarEleccion();
+      apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca }).then(function (r) {
+        manual.generando = false;
+        r.sinArca = !ed.arca;
+        manual.resultado = r; manual.ed = null; pintarEleccion();
+        firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
+        if (r.arca) esperarArca(r, 0);
+      }).catch(function (e) { manual.generando = false; aviso(traducirError(e)); pintarEleccion(); });   // lo editado no se pierde
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
   }
