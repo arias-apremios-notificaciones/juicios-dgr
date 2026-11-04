@@ -12,11 +12,24 @@ var Modelos = (function () {
                           'A tal efecto, acompaño constancia de inscripción de ARCA. Téngase presente.'];
   // Comparecencia de los escritos de honorarios (EscritosHon.js, sellada el 30/10/2026).
   var POR_DERECHO_PROPIO = ', abogado, apoderado de la parte actora, por derecho propio a V.S. respetuosamente digo:';
+  // COMUNICO ESTADO DE LA DEUDA: el escrito de GALVEZ PALERMO (pago parcial) y la variante sin pagos.
+  var ESTADO_DEUDA_PARCIAL = [
+    'Vengo a comunicar la imputación de la transferencia efectuada, por lo que la deuda en ejecución se regularizó de manera parcial, conforme surge del IVP N° {IVP N°} que se adjunta, de donde surge que por la Boleta de Deuda {BOLETA DE DEUDA} queda un remanente a cancelar de {SALDO} a la fecha de confección de dicho informe, la que deberá ser actualizada hasta la fecha de su efectivo pago. Asimismo se acompaña Planilla de cálculo.',
+    'Por lo expuesto, solicito que se corra traslado a la demandada a los fines del debido control.'];
+  var ESTADO_DEUDA_SIN_PAGOS = [
+    'Vengo a comunicar el estado actualizado de la deuda en ejecución, conforme surge del IVP N° {IVP N°} que se adjunta, de donde surge que no se registran pagos imputados a la Boleta de Deuda {BOLETA DE DEUDA}, por lo que la deuda se mantiene íntegramente impaga y asciende a la suma de {SALDO} a la fecha de confección de dicho informe, la que deberá ser actualizada hasta la fecha de su efectivo pago. Asimismo se acompaña Planilla de cálculo.',
+    'Por lo expuesto, solicito que se corra traslado a la demandada a los fines del debido control.'];
+  // Desplegable del embargo: los bancos que más aparecen en los oficios del SAE y los habituales en Tucumán ("Otro" se escribe a mano).
+  var BANCOS = ['BANCO BBVA ARGENTINA S.A.', 'BANCO COMAFI S.A.', 'BANCO CREDICOOP COOPERATIVO LTDO.', 'BANCO DE GALICIA Y BUENOS AIRES S.A.U.',
+                'BANCO DE LA NACION ARGENTINA', 'BANCO DEL TUCUMAN S.A.', 'BANCO HIPOTECARIO S.A.', 'BANCO HSBC ARGENTINA S.A.', 'BANCO ICBC ARGENTINA S.A.U.',
+                'BANCO INDUSTRIAL S.A.', 'BANCO MACRO S.A.', 'BANCO PATAGONIA S.A.', 'BANCO SANTANDER RIO SA', 'BANCO SUPERVIELLE S.A.'];
 
   /*
    * Cada modelo: nombre (= título, como se lista), claves (para el buscador), titulo, presentacion, cuerpo, arca,
-   * adjunto (lo que Carlos sube y se une detrás del escrito), campos (datos entre llaves), calcular, seguimiento, cierre.
-   * Campos: tipo texto | fecha | monto | cuit; auto: demandado | cuit | hoy (se completa solo con el MAESTRO / la fecha de hoy).
+   * adjunto (lo que Carlos sube y se une detrás del escrito), campos (datos entre llaves), calcular, seguimiento, cierre,
+ * requisitos (lo que Carlos confirma en la app antes de generar).
+   * Campos: tipo texto | fecha | monto | cuit | opciones (desplegable, con "Otro" a mano); auto: demandado | cuit | hoy (se completa solo con el MAESTRO / la fecha de hoy).
+ * variantes: cuerpos alternativos que se eligen en la app (el primero es el del modelo).
    */
   var MODELOS = {
     // ── Sellados el 04/11/2026 ──
@@ -114,6 +127,78 @@ var Modelos = (function () {
       presentacion: ', apoderado de la parte actora, por derecho propio a V.S. respetuosamente digo:',
       cuerpo: ['Vengo a dar cumplimiento con el proveído que antecede. A tales efectos, acompaño constancia de inscripción ante ARCA. Se agregue y se tenga presente.'],
       arca: true
+    },
+    // ── Sellados el 04/11/2026 (segunda tanda) ──
+    // "CONSULTING SERVICE S.R.L. (2947-21) - ACOMPAÑO ARANCEL"
+    ACOMPANO_ARANCEL: {
+      nombre: 'ACOMPAÑO ARANCEL', claves: 'arancel oficio registro automotor dnrpa seccional proveido',
+      titulo: 'ACOMPAÑO ARANCEL',
+      presentacion: ', apoderado de la actora, a V.S. respetuosamente DIGO:',
+      cuerpo: ['Dando cumplimiento con el proveído que antecede, vengo a acompañar el arancel correspondiente, a los fines de diligenciar el oficio al Registro Seccional del Automotor N° {REGISTRO N°} de Tucumán. Se agregue y se tenga presente.'],
+      campos: [{ id: 'REGISTRO N°', etiqueta: 'N° del Registro Seccional del Automotor (ej. 8)', tipo: 'texto' }],
+      adjunto: { etiqueta: 'Arancel', archivo: 'ARANCEL' }
+    },
+    // "ELITE SECURITY GROUP S.R.L. (3839-20) - ACOMPAÑO INFORME. PIDO INHIBICION GENERAL DE BIENES"
+    INHIBICION_GENERAL: {
+      nombre: 'ACOMPAÑO INFORME. PIDO INHIBICION GENERAL DE BIENES', claves: 'inhibicion general bienes dnrpa automotor informe negativo sin bienes 302',
+      titulo: 'ACOMPAÑO INFORME. PIDO INHIBICION GENERAL DE BIENES',
+      presentacion: ', apoderado de la actora, a V.S. respetuosamente DIGO:',
+      cuerpo: [
+        'I.- ACOMPAÑO INFORME:',
+        'Vengo a acompañar Informe de la DNRPA, de donde surge que la demandada {DEMANDADO}, CUIT N° {CUIT}, no posee automotores a su nombre. Se agregue y se tenga presente.',
+        'II.- SOLICITO INHIBICION DE BIENES:',
+        'Que atento el estado de autos, donde se pudo constatar de los informes solicitados que el demandado {DEMANDADO}, CUIT N° {CUIT} no posee bienes a su nombre que pudieran cubrir el monto demandado, convirtiéndose en infructuosa y dilatoria cualquier intento de ejecución de sentencia que se pretenda, declaro bajo juramento que desconozco que el demandado {DEMANDADO} tenga bienes susceptibles de ser embargados, por lo que solicito se ordene la INHIBICION GENERAL DE BIENES en contra del mismo.',
+        'Encontrándose acreditadas las exigencias previstas en el artículo 302 CPCCT, solicito se haga lugar a la medida solicitada, y se libren todos los oficios correspondientes, es decir, al REGISTRO INMOBILIARIO, al REGISTRO NACIONAL DEL AUTOMOTOR y al Registro Público de Comercio, con la salvedad de consignar la leyenda “LIBRE DE DERECHO”, dado que mi mandante es sujeto exento.',
+        'Resultan ser precedentes válidos las decenas de inhibiciones otorgadas en iguales condiciones, como las que se citan a continuación: causa SEI Ingeniería SRL – Expte. 4602/22, causa AEREGE SRL Expte. 1857/20, causa Madie SRL Expte. 6280/17, causa Jaraco SRL Expte. 8502/24, causa Consultas y Proyectos S.A. Expte. 3556/15, Lacteos y Fiambres del NOA Expte. 7811/22 entre otras, por lo que revocándose por contrario imperio la denegatoria efectuada, se procedió a dictar la medida solicitada.'
+      ],
+      campos: [{ id: 'DEMANDADO', etiqueta: 'Demandado', tipo: 'texto', auto: 'demandado' },
+               { id: 'CUIT', etiqueta: 'CUIT del demandado', tipo: 'cuit', auto: 'cuit' }],
+      // Lo que tiene que estar en el SAE antes de pedirla (Carlos lo confirma en la app).
+      requisitos: ['El informe del Registro Inmobiliario (sin inmuebles a su nombre) ya está subido en el SAE.',
+                   'El informe de ARCA es negativo de actividades.'],
+      adjunto: { etiqueta: 'Informe de la DNRPA (sin automotores)', archivo: 'INFORME DNRPA' }
+    },
+    // "GALVEZ PALERMO MARIA SOLEDAD (7169-25) - COMUNICO ESTADO DE LA DEUDA": a mano, para IVP con pago mínimo o sin pago
+    // (el motor ya redacta solo COMUNICO CANCELACIÓN cuando hay IVP generado).
+    ESTADO_DEUDA: {
+      nombre: 'COMUNICO ESTADO DE LA DEUDA', claves: 'ivp remanente pago parcial imputacion transferencia boleta deuda planilla calculo saldo',
+      titulo: 'COMUNICO ESTADO DE LA DEUDA',
+      presentacion: ', apoderado de la parte actora, a V.S. respetuosamente digo:',
+      cuerpo: ESTADO_DEUDA_PARCIAL,
+      // Carlos pidió la variante sin pagos (04/11/2026); en la app se elige y reemplaza el cuerpo.
+      variantes: [{ nombre: 'Con pago parcial', cuerpo: ESTADO_DEUDA_PARCIAL }, { nombre: 'Sin pagos', cuerpo: ESTADO_DEUDA_SIN_PAGOS }],
+      campos: [{ id: 'IVP N°', etiqueta: 'N° del IVP (ej. I 202609577)', tipo: 'texto' },
+               { id: 'BOLETA DE DEUDA', etiqueta: 'Boleta de deuda (ej. BCOT/3053/2025)', tipo: 'texto' },
+               { id: 'SALDO', etiqueta: 'Saldo a cancelar según el IVP', tipo: 'monto' }],
+      seguimiento: 'COMUNICO ESTADO DE LA DEUDA: SALDO {SALDO}.',
+      adjunto: { etiqueta: 'IVP y planilla de cálculo', archivo: 'IVP Y PLANILLA' }
+    },
+    // "LOGISTICA LA SERENISIMA S.A. (4191-17) - PIDO EMBARGO POR HONORARIOS". Texto = el sellado el 30/10/2026 en EscritosHon.js (art. 611, no 608).
+    EMBARGO_HONORARIOS: {
+      nombre: 'PIDO EMBARGO EJECUTORIO POR HONORARIOS', claves: 'embargo ejecutorio honorarios banco cuenta fondos regulacion firme 611',
+      titulo: 'PIDO EMBARGO EJECUTORIO POR HONORARIOS',
+      presentacion: POR_DERECHO_PROPIO, cierre: true,
+      cuerpo: [
+        'Encontrándose firme y consentida la regulación de honorarios, vengo a ejecutar la misma. En tal sentido, y conforme lo previsto por el artículo 611 procesal, solicito que se trabe embargo ejecutorio, el cual se deberá efectivizar sobre los fondos que el accionado {DEMANDADO}, CUIT N° {CUIT}, tenga depositados o se depositen en el futuro en cuenta corriente y/o caja de ahorro y/o cuenta de valores al cobro y/o cuenta títulos y/o depósitos a plazo fijo, en el {BANCO} por la suma de {HONORARIOS}, en concepto de honorarios, más la suma de {IVA} en concepto de IVA, más {APORTES} en concepto de aportes previsionales obligatorios correspondientes al 10%, con más lo que V.S. presupueste para responder por acrecidas. A tal efecto, solicito se libre el oficio correspondiente.',
+        'Se deja constancia que el monto por el cual se solicita el embargo, es el monto original regulado, por lo que se hace expresa reserva de actualizar los honorarios hasta la fecha de efectivo pago de los mismos. Se tenga presente.',
+        'Que efectivizada la misma, se haga saber a la accionada. Se tenga presente.'
+      ],
+      campos: [{ id: 'DEMANDADO', etiqueta: 'Demandado', tipo: 'texto', auto: 'demandado' },
+               { id: 'CUIT', etiqueta: 'CUIT del demandado', tipo: 'cuit', auto: 'cuit' },
+               { id: 'BANCO', etiqueta: 'Banco', tipo: 'opciones', opciones: BANCOS },
+               { id: 'HONORARIOS', etiqueta: 'Honorarios regulados (el IVA 21 % y los aportes 10 % se calculan solos)', tipo: 'monto' }],
+      calcular: function (n) {
+        var h = n.HONORARIOS, iva = Math.round(h * 21) / 100, ap = Math.round(h * 10) / 100;
+        return { IVA: pesos(iva), APORTES: pesos(ap), TOTAL: pesos(h + iva + ap) };
+      },
+      seguimiento: 'PIDO EMBARGO POR HONORARIOS: {TOTAL} ({BANCO}).'
+    },
+    // "MOLINA PADILLA XIMENA (14368-26) - SE REMITA A OFICIALES AD HOC": título cambiado por Carlos.
+    OFICIALES_AD_HOC: {
+      nombre: 'SOLICITO SE LIBRE MANDAMIENTO A OFICIALES AD HOC', claves: 'oficiales justicia ad hoc mandamiento intimacion pago capital casillero digital remita acordada',
+      titulo: 'SOLICITO SE LIBRE MANDAMIENTO A OFICIALES AD HOC',
+      presentacion: ', por el actor en autos a V.S., digo respetuosamente:',
+      cuerpo: ['Siendo que el domicilio del demandado es en el radio capital de la Provincia, solicito que se confeccione mandamiento de intimación de pago y se remita a casillero digital de Oficiales de Justicia ad hoc autorizados por Acordadas Nros. 423/2000, 587/2000 y concordantes, para su debido diligenciamiento. Se tenga presente.']
     }
   };
 
@@ -181,8 +266,9 @@ var Modelos = (function () {
     if (!m) return null;
     var ag = {};
     Object.keys(AGREGADOS).forEach(function (k) { ag[k] = AGREGADOS[k]; });
-    return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null,
-             campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '' }; }), agregados: ag };
+    return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null, requisitos: (m.requisitos || []).slice(),
+             variantes: (m.variantes || []).map(function (v) { return { nombre: v.nombre, cuerpo: v.cuerpo.slice() }; }),
+             campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', opciones: (c.opciones || []).slice() }; }), agregados: ag };
   }
 
   /** Valor automático de un campo (auto = { demandado, cuit, hoy } del juicio). */

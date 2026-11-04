@@ -2507,9 +2507,10 @@
     if (!manual.ed) {
       var auto = { demandado: f.d, cuit: f.c, hoy: isoADmy(hoyInput()) }, iniciales = {};
       campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
-      manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales };
+      manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales, requisitos: [] };
     }
     var ed = manual.ed;
+    var requisitos = m.requisitos || [];
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
       return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos,
@@ -2539,6 +2540,24 @@
     cuerpo.addEventListener('input', function () { ed.cuerpo = cuerpo.value; actualizarVista(); });
     var datos = [];   // etiqueta + casilla de cada dato (h() aplana un solo nivel)
     campos.forEach(function (c, i) {
+      if (c.tipo === 'opciones') {   // desplegable (bancos del embargo); "Otro" abre una casilla para escribirlo
+        var valor = ed.campos[c.id] || '', otro = valor && c.opciones.indexOf(valor) < 0;
+        var sel = h('select', { id: 'mod-campo-' + i, class: 'campo-form' },
+          h('option', { value: '' }, 'Elegí…'),
+          c.opciones.map(function (o) { return h('option', { value: o, selected: o === valor }, o); }),
+          h('option', { value: '*', selected: otro }, 'Otro (escribirlo)'));
+        var libre = h('input', { class: 'campo-form', autocomplete: 'off', value: otro ? valor : '', placeholder: 'Nombre completo', 'aria-label': c.etiqueta + ': otro' });
+        libre.style.display = otro ? '' : 'none';
+        sel.addEventListener('change', function () {
+          libre.style.display = sel.value === '*' ? '' : 'none';
+          ed.campos[c.id] = sel.value === '*' ? libre.value : sel.value;
+          if (sel.value === '*') libre.focus();
+          actualizarVista();
+        });
+        libre.addEventListener('input', function () { ed.campos[c.id] = libre.value; actualizarVista(); });
+        datos.push(h('label', { class: 'etiqueta', for: 'mod-campo-' + i, text: c.etiqueta + ' → {' + c.id + '}' }), sel, libre);
+        return;
+      }
       var inp = h('input', { id: 'mod-campo-' + i, class: 'campo-form', autocomplete: 'off', value: ed.campos[c.id] || '',
                              inputmode: c.tipo === 'monto' ? 'decimal' : c.tipo === 'cuit' ? 'numeric' : null,
                              placeholder: c.tipo === 'fecha' ? 'dd/mm/aaaa' : c.tipo === 'monto' ? 'Ej. 15.500 o 85.870,33' : '' });
@@ -2546,6 +2565,20 @@
       datos.push(h('label', { class: 'etiqueta', for: 'mod-campo-' + i, text: c.etiqueta + ' → {' + c.id + '}' }), inp);
     });
     arca.addEventListener('change', function () { ed.arca = arca.checked; });
+
+    // Variantes del cuerpo (p. ej. estado de la deuda con pago parcial o sin pagos): elegir una reemplaza el cuerpo.
+    var variantes = m.variantes || [], elegirVariante = null;
+    if (variantes.length) {
+      elegirVariante = h('select', { id: 'mod-variante', class: 'campo-form' },
+        variantes.map(function (v, i) { return h('option', { value: String(i), selected: i === (ed.variante || 0) }, v.nombre); }));
+      elegirVariante.addEventListener('change', function () {
+        var i = Number(elegirVariante.value), antes = variantes[ed.variante || 0].cuerpo.join('\n\n');
+        if (ed.cuerpo.trim() !== antes.trim() && !confirm('Cambiaste el cuerpo. ¿Reemplazarlo por la variante "' + variantes[i].nombre + '"?')) {
+          elegirVariante.value = String(ed.variante || 0); return;
+        }
+        ed.variante = i; ed.cuerpo = variantes[i].cuerpo.join('\n\n'); pintarEleccion();
+      });
+    }
 
     var agregados = Object.keys(m.agregados || {}).map(function (k) {
       var ag = m.agregados[k];
@@ -2576,9 +2609,18 @@
         ed.archivos.length ? null : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
     }
 
+    // Lo que tiene que estar en el SAE antes de pedirlo (p. ej. la inhibición): Carlos lo tilda.
+    var tildes = requisitos.map(function (t, i) {
+      var c = h('input', { type: 'checkbox', checked: !!ed.requisitos[i] });
+      c.addEventListener('change', function () { ed.requisitos[i] = c.checked; });
+      return h('label', { class: 'check-hon' }, c, ' ' + t);
+    });
+
     caja.appendChild(h('div', { class: 'panel form-hon' },
+      requisitos.length ? h('div', { class: 'ayuda chica', text: 'Antes de generar, confirmá:' }) : null, tildes,
       campos.length ? h('div', { class: 'ayuda chica', text: 'Datos del escrito: van donde el texto dice {…}.' }) : null, datos,
       h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' }), titulo,
+      elegirVariante ? h('label', { class: 'etiqueta', for: 'mod-variante', text: 'Variante del texto' }) : null, elegirVariante,
       h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' }), cuerpo,
       vista,
       subir,
@@ -2591,6 +2633,8 @@
       var parrafos = ed.cuerpo.split(/\n\s*\n/).map(function (x) { return x.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
       var control = armado(true);
       if (!control.ok) { aviso(control.error); return; }
+      var falta = requisitos.filter(function (t, i) { return !ed.requisitos[i]; });
+      if (falta.length) { aviso('Antes de generar, confirmá: ' + falta[0]); return; }
       if (p.pendiente && !confirm('Ya hay un escrito para firmar de este expediente. ¿Generar igual?')) return;
       manual.generando = true; pintarEleccion();
       Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
