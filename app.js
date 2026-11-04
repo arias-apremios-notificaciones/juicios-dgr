@@ -134,6 +134,7 @@
       if (!guardar(LS.datos, d)) console.warn('No se pudo guardar la copia local');
       sync(estado.filas.length + ' juicios · ' + haceCuanto(d.generado));
       render();
+      if (estado.vista === 'tablero') pintarTablero();
     }).catch(function (e) {
       sync(estado.filas.length ? 'Copia local · ' + haceCuanto(estado.generado) : 'Sin datos', 'error');
       if (forzado || !estado.filas.length) aviso('No se pudo actualizar: ' + e.message);
@@ -685,16 +686,27 @@
     $('escritos').hidden = v !== 'escritos';
     $('honorarios').hidden = v !== 'honorarios';
     $('agenda').hidden = v !== 'agenda';
+    $('tablero').hidden = v !== 'tablero';
     actualizarBarraAcciones();
     actualizarAlertasAgenda();
     if (v === 'firmar') cargarFirmar();
     else if (v === 'escritos') pintarEscritos();
     else if (v === 'honorarios') cargarHonorarios();
     else if (v === 'agenda') { pintarAgenda(); cargarAgenda(); }
+    else if (v === 'tablero') pintarTablero();
     else render();
     window.scrollTo(0, 0);
     var pest = document.querySelector('.pestana.activa');
     if (pest && pest.scrollIntoView) pest.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }
+
+  // Tablero (app/tablero.js): juicios con los datos del MAESTRO; honorarios solo si la pestaña Honorarios está abierta con el PIN.
+  function pintarTablero() {
+    Tablero.pintar($('tablero'), {
+      h: h, filas: estado.filas, hoy: hoyInput(), generado: estado.generado, importe: importe,
+      hon: hon.datos && hon.datos.estadisticas, honPendiente: hon.datos && hon.datos.pendientes && hon.datos.pendientes.total,
+      irAHonorarios: function () { cambiarVista('honorarios'); }
+    });
   }
 
   function verJuicio(expte) {

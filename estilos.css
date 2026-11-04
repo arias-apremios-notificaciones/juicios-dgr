@@ -470,3 +470,40 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .aviso-drive-botones .btn { text-decoration: none; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .aviso-drive { background: #16264A; color: #CFE0FF; border-color: #263D6E; } }
 :root[data-theme="dark"] .aviso-drive { background: #16264A; color: #CFE0FF; border-color: #263D6E; }
+
+/* ───────── Tablero (04/11/2026): un color por gráfico, validado contra la superficie clara y la oscura ───────── */
+:root { --serie-1: #2a78d6; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --serie-1: #3987e5; } }
+:root[data-theme="dark"] { --serie-1: #3987e5; }
+#tablero { padding: 0 16px 24px; max-width: 900px; margin: 0 auto; }
+.tab-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.tab-tile { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; box-shadow: var(--sombra); }
+.tab-tile-num { font-size: clamp(17px, 4.6vw, 22px); font-weight: 700; color: var(--texto); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tab-tile-etq { font-size: 13px; color: var(--texto-2); margin-top: 2px; }
+.tab-tile-sub { font-size: 12px; color: var(--texto-3); margin-top: 2px; }
+.tab-grafico { background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio); padding: 12px 14px; margin-bottom: 12px; box-shadow: var(--sombra); }
+.tab-titulo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 6px; }
+.tab-titulo b { font-size: 15px; color: var(--texto); }
+.tab-titulo span { font-size: 12px; color: var(--texto-3); }
+.tab-lienzo { position: relative; width: 100%; }
+.tab-lienzo svg { display: block; overflow: visible; width: 100%; height: auto; }   /* el svg global mide 22px (íconos) */
+.tab-barra { fill: var(--serie-1); }
+.tab-zona { fill: transparent; cursor: pointer; outline: none; }
+.tab-zona:focus-visible { stroke: var(--texto-3); stroke-width: 1; }
+.tab-grilla { stroke: var(--borde); stroke-width: 1; }
+.tab-base { stroke: var(--texto-3); stroke-width: 1; }
+.tab-eje { fill: var(--texto-3); font-size: 11px; }
+.tab-valor { fill: var(--texto); font-size: 11px; font-weight: 600; }
+.tab-tip { position: absolute; z-index: 2; width: 180px; padding: 6px 9px; border-radius: 8px; font-size: 12px; line-height: 1.35; pointer-events: none;
+           background: var(--texto); color: var(--superficie); box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
+.tab-ver-tabla { margin-top: 6px; font-size: 13px; color: var(--texto-2); }
+.tab-ver-tabla summary { cursor: pointer; }
+.tab-tabla { width: 100%; border-collapse: collapse; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.tab-tabla th, .tab-tabla td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--borde); }
+.tab-tabla td:last-child, .tab-tabla th:last-child { text-align: right; }
+.tab-barras { display: grid; gap: 6px; }
+.tab-fila { display: grid; grid-template-columns: minmax(90px, 34%) 1fr auto; align-items: center; gap: 8px; font-size: 13px; }
+.tab-etq { color: var(--texto-2); overflow-wrap: anywhere; }
+.tab-pista { height: 12px; }
+.tab-relleno { display: block; height: 12px; background: var(--serie-1); border-radius: 0 4px 4px 0; }
+.tab-num { color: var(--texto); font-variant-numeric: tabular-nums; white-space: nowrap; }
