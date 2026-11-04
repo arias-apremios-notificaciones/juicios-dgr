@@ -1158,7 +1158,7 @@
 
     // Tarjetas: una por sección (como en Para firmar y Agenda). Al abrir una, se ve solo esa sección.
     var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
-    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar' };
+    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar', alta: 'Agregar un juicio' };
     if (hon.grupo && nombres[hon.grupo]) {
       cont.appendChild(cabeceraGrupo(nombres[hon.grupo], function () { abrirGrupoHon(null); }));
       if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
@@ -1166,6 +1166,7 @@
       else if (hon.grupo === 'cobrado') pintarCobradoMes(cont, m);
       else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
       else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
+      else if (hon.grupo === 'alta') pintarAltaHon(cont, d);
       cont.appendChild(pieGrupo(function () { abrirGrupoHon(null); }));
       return;
     }
@@ -1196,6 +1197,7 @@
     var problemasFact = F && !F.error && (F.sinFactura.length || F.sinCobro.length || F.diferencias.length);
     var forms = d.formularios || [], armando = forms.filter(function (x) { return x.estado === 'EN_COLA'; }).length;
     var sinAnotar = forms.filter(function (x) { return x.estado === 'LISTO' && !anotadoTodo(x); }).length + hon.generados.filter(function (x) { return !anotadoTodo(x); }).length;
+    var faltan = crucesFaltan(d);
     var datosTarjeta = {
       semana: { numero: L ? L.cantidad : 0, unidad: 'pendientes', info: L ? [importe(L.total), 'Tramitados: ' + L.tramitados + ' de ' + L.cantidad] : ['Se arma el domingo a la noche'] },
       escritos: { info: ['Orden de pago, embargo, planilla y regulación', 'Formulario del Registro (Res. 546)', forms.length ? 'Formularios de la semana: ' + forms.length : ''],
@@ -1203,7 +1205,9 @@
       cobrado: { numero: importe(m.total), unidad: '', info: [m.registrados.length + (m.registrados.length === 1 ? ' cobro' : ' cobros')],
                  alerta: problemasFact || m.enTexto.length ? '⚠ Hay algo para verificar' : '' },
       tramitados: { numero: d.semana.lista.length, unidad: 'la semana pasada', info: ['Agosto – octubre: ' + d.primer.lista.length] },
-      revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] }
+      revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] },
+      alta: { info: ['Un juicio del MAESTRO que no está en la planilla', 'Fila nueva en orden alfabético'],
+              alerta: faltan.length ? (faltan.length === 1 ? '1 juicio' : faltan.length + ' juicios') + ' para revisar si falta' : '' }
     };
     var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
     Object.keys(nombres).forEach(function (id) {
@@ -1283,8 +1287,10 @@
       grupos[t].forEach(function (x) {
         var item = h('div', { class: 'item-rev' }, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e }),
           h('div', { class: 'motivo', text: x.texto }));
+        var area = h('div', { class: 'area-accion' }), fm = filaMaestro(x);
         var botones = h('div', { class: 'botones-hon' },
           x.r ? linkHon(x.r) : null,
+          fm && !x.r ? h('button', { class: 'btn primario', type: 'button', onclick: function () { formAltaHon(area, fm, d); } }, 'Agregar a HONORARIOS') : null,
           enMaestro(x.e) ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio') : null,
           h('button', { class: 'btn', type: 'button', onclick: function () {
             if (!confirm('¿Sacar este aviso de la lista? (' + x.d + ')')) return;
@@ -1294,10 +1300,93 @@
             }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
           } }, 'No corresponde'));
         item.appendChild(botones);
+        item.appendChild(area);
         dr.appendChild(item);
       });
     });
     cont.appendChild(dr);
+  }
+
+  // ───────── Agregar a HONORARIOS un juicio del MAESTRO que no está (pedido de Carlos, 04/11/2026) ─────────
+  function crucesFaltan(d) { return (d.cruces || []).filter(function (x) { return x.tipo === 'FALTA_EN_HONORARIOS' || x.tipo === 'POSIBLE_FALTA'; }); }
+
+  /** La fila del MAESTRO de un aviso (por número de fila; si cambió, por expediente). */
+  function filaMaestro(x) {
+    var clave = Buscador.exptesDe(x.e)[0];
+    return estado.filas.filter(function (f) { return f.r === x.m && Buscador.exptesDe(f.e)[0] === clave; })[0] ||
+           estado.filas.filter(function (f) { return clave && Buscador.exptesDe(f.e)[0] === clave; })[0] || null;
+  }
+
+  function filasEnHon(d, e) { var k = Buscador.exptesDe(e)[0]; return (k && d.enPlanilla && d.enPlanilla[k]) || []; }
+
+  function pintarAltaHon(cont, d) {
+    var caja = h('div'), lista = h('div', { class: 'man-lista' });
+    var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor', 'aria-label': 'Expediente o deudor' });
+    var elegir = function (f) {
+      inp.value = f.e; lista.textContent = ''; caja.textContent = '';
+      var area = h('div', { class: 'area-accion' });
+      caja.appendChild(area);
+      formAltaHon(area, f, d);
+    };
+    inp.addEventListener('input', function () {
+      lista.textContent = ''; caja.textContent = '';
+      var t = inp.value.trim();
+      if (!t) return;
+      Buscador.buscar(estado.indice, t, 6).forEach(function (r) {
+        var f = estado.filas[r.i], ya = filasEnHon(d, f.e);
+        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { elegir(f); } },
+          h('b', { text: f.d }), h('span', { text: 'Expte. ' + f.e + ' · ' + (f.g || '') + (ya.length ? ' · ya está en HONORARIOS (fila ' + ya.join(', ') + ')' : '') })));
+      });
+    });
+    cont.appendChild(h('div', { class: 'panel' },
+      h('p', { class: 'ayuda chica', text: 'Buscá el juicio en el MAESTRO por expediente o deudor. Se agrega una fila nueva en HONORARIOS, en orden alfabético, con el deudor, la nominación, el expediente, el monto del juicio y el CUIT. Vos cargás el monto de honorarios (si ya lo sabés) y la primera línea del TRAMITE PENDIENTE.' }),
+      inp, lista, caja));
+    var faltan = crucesFaltan(d);
+    if (!faltan.length) return;
+    cont.appendChild(h('div', { class: 'anio' }, 'Sugeridos: en el MAESTRO y no en HONORARIOS', h('small', { text: String(faltan.length) })));
+    faltan.forEach(function (x) {
+      var area = h('div', { class: 'area-accion' }), fm = filaMaestro(x);
+      cont.appendChild(h('div', { class: 'item-rev' }, h('b', { text: x.d }), h('div', { class: 'meta', text: 'Expte. ' + x.e }), h('div', { class: 'motivo', text: x.texto }),
+        h('div', { class: 'botones-hon' },
+          fm ? h('button', { class: 'btn primario', type: 'button', onclick: function () { formAltaHon(area, fm, d); } }, 'Agregar a HONORARIOS') : null,
+          fm ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio') : null),
+        area));
+    });
+  }
+
+  /** Datos del MAESTRO para revisar + monto de honorarios y primera línea del trámite; escribe con confirmación y PIN. */
+  function formAltaHon(area, f, d) {
+    if (area.dataset.tipo === 'alta') { area.textContent = ''; area.dataset.tipo = ''; return; }
+    area.textContent = ''; area.dataset.tipo = 'alta';
+    var ya = filasEnHon(d, f.e);
+    var ult = Buscador.seguimiento(f.f).filter(function (x) { return x.fecha; })[0];
+    var monto = h('input', { class: 'campo-form', inputmode: 'decimal', placeholder: 'Monto de honorarios (opcional)', 'aria-label': 'Monto de honorarios' });
+    var texto = h('textarea', { class: 'campo-form', rows: '3', 'aria-label': 'Primera línea del TRAMITE PENDIENTE' });
+    texto.value = 'SE CARGA EN HONORARIOS.' + (ult ? ' ÚLTIMO MOVIMIENTO (' + ult.fecha + '): ' + ult.texto.slice(0, 200) : '');
+    var repetir = h('input', { type: 'checkbox' });
+    var dato = function (k, v) { return h('div', { class: 'meta' }, h('b', { text: k + ': ' }), String(v || '—')); };
+    var fo = h('form', { class: 'form-hon' },
+      h('div', { class: 'ayuda chica', text: 'Datos del MAESTRO (fila ' + f.r + '):' }),
+      dato('Demandado', f.d), dato('Nominación', Buscador.nominacion(f.n).texto), dato('Expediente', f.e), dato('Monto del juicio', importe(f.i)), dato('CUIT', cuit(f.c)), dato('Estado', f.g),
+      ya.length ? h('div', { class: 'alerta' }, 'Este expediente ya está en HONORARIOS (fila ' + ya.join(', ') + '). ',
+        h('label', null, repetir, ' Es otra regulación: agregar otra fila')) : null,
+      h('label', { class: 'etiqueta', text: 'Monto de honorarios' }), monto,
+      h('label', { class: 'etiqueta', text: 'TRAMITE PENDIENTE (se anota con la fecha de hoy)' }), texto,
+      h('button', { class: 'btn primario', type: 'submit' }, 'Agregar a HONORARIOS'));
+    fo.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      if (ya.length && !repetir.checked) { aviso('Ya está en HONORARIOS: si es otra regulación, marcá "agregar otra fila"'); return; }
+      var t = texto.value.trim(), mh = monto.value.trim(), n = mh ? numeroAr(mh) : null;
+      if (t.length < 3) { aviso('Escribí la primera línea del TRAMITE PENDIENTE'); return; }
+      if (mh && !n) { aviso('El monto de honorarios no es válido'); return; }
+      escribirHon({ a: 'honAlta', e: f.e, m: f.r, monto: n ? n.toFixed(2) : '', texto: t, repetir: repetir.checked },
+        'Se agrega una fila nueva en HONORARIOS, en orden alfabético:\n\n' + f.d + '\nExpte. ' + f.e + ' · ' + Buscador.nominacion(f.n).texto +
+        '\nMonto del juicio: ' + importe(f.i) + '\nHonorarios: ' + (n ? importe(n) : '(sin cargar)') + '\nCUIT: ' + cuit(f.c) +
+        '\n\nTRAMITE PENDIENTE:\n- ' + isoADmy(hoyInput()) + ': ' + t.toUpperCase() + '\n\n¿Confirmás?', 'Agregado en HONORARIOS')
+        .then(function (ok) { if (ok) { area.textContent = ''; area.dataset.tipo = ''; } });
+    });
+    area.appendChild(fo);
+    monto.focus();
   }
 
   function formDatosPago(dp) {
