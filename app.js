@@ -2010,14 +2010,10 @@
   }
 
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
-  var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' },
-                       { id: 'COMUNICO_IVP', nombre: 'Comunicación de cancelación (IVP)' },
-                       // Modelos sellados de la carpeta MODELOS PARA LA APP (Modelos.js): título y cuerpo editables.
-                       { id: 'DEVUELVO_CEDULA_LEY', nombre: 'Devuelvo cédula ley diligenciada', modelo: true },
-                       { id: 'DEVUELVO_OFICIO_RI', nombre: 'Devuelvo oficio diligenciado al RI', modelo: true }];
-  // ed: el título, el cuerpo y los archivos a unir del modelo tal como los dejó Carlos (null = todavía sin tocar)
-  var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null };
-  function esModelo(tipo) { return TIPOS_ESCRITO.some(function (t) { return t.id === tipo && t.modelo; }); }
+  // Los tipos (en orden alfabético) y el buscador por palabras están en modelos.js, igual que los textos sellados.
+  // ed: el título, el cuerpo, los datos entre llaves y los archivos a unir del modelo tal como los dejó Carlos (null = todavía sin tocar)
+  var manual = { tipo: null, buscarModelo: '', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null };
+  function esModelo(tipo) { return !!Modelos.MODELOS[tipo]; }
 
   var LECTURA_MOTOR = {
     PEDIR: ['ok', 'El motor también pediría sentencia'],
@@ -2354,15 +2350,34 @@
     cont.textContent = '';
     if (!estado.cfg) { cont.appendChild(h('p', { class: 'ayuda', text: 'Configurá la app primero (engranaje).' })); return; }
 
-    var sel = h('select', { id: 'man-tipo', class: 'campo-form' });
-    TIPOS_ESCRITO.forEach(function (t) { var o = h('option', { value: t.id, text: t.nombre }); if (t.id === manual.tipo) o.selected = true; sel.appendChild(o); });
-    sel.addEventListener('change', function () {
-      manual.tipo = sel.value; manual.ed = null;
+    // Modelo: buscador por palabras clave + lista en orden alfabético.
+    var buscarM = h('input', { id: 'man-modelo', class: 'campo-form', type: 'search', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false',
+                               placeholder: 'Buscar por palabra: cédula, oficio, bono, planilla…', value: manual.buscarModelo });
+    var listaM = h('div', { class: 'man-lista' });
+    var elegirTipo = function (id) {
+      manual.tipo = id; manual.ed = null; manual.buscarModelo = ''; buscarM.value = '';
+      pintarModelos();
       if (manual.fila) elegirJuicio(manual.fila);   // vuelve a consultar con el tipo nuevo
-    });
+      else { pintarEleccion(); $('man-expte').focus(); }
+    };
+    var pintarModelos = function () {
+      manual.buscarModelo = buscarM.value;
+      listaM.textContent = '';
+      var t = buscarM.value.trim();
+      var elegido = Modelos.lista().filter(function (x) { return x.id === manual.tipo; })[0];
+      if (elegido && !t) {
+        listaM.appendChild(h('div', { class: 'man-elegido' }, h('b', { text: '✓ ' + elegido.nombre }),
+          h('button', { class: 'btn chico', type: 'button', onclick: function () { manual.tipo = null; manual.ed = null; manual.previa = null; pintarModelos(); pintarEleccion(); buscarM.focus(); } }, 'Cambiar')));
+        return;
+      }
+      var res = t ? Modelos.buscar(t) : Modelos.lista();
+      res.forEach(function (x) { listaM.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { elegirTipo(x.id); } }, h('b', { text: x.nombre }))); });
+      if (!res.length) listaM.appendChild(h('p', { class: 'ayuda chica', text: 'Ningún modelo tiene esas palabras.' }));
+    };
+    buscarM.addEventListener('input', pintarModelos);
     var inp = h('input', { id: 'man-expte', class: 'campo-form', type: 'search', inputmode: 'search', autocomplete: 'off', autocorrect: 'off',
                            spellcheck: 'false', placeholder: 'Ej. 10420/26 o parte del nombre', value: manual.texto });
-    var lista = h('div', { class: 'man-lista' });
+    var lista = h('div', { id: 'man-juicios', class: 'man-lista' });
     var mostrarCoincidencias = function () {
       manual.texto = inp.value;
       lista.textContent = '';
@@ -2379,10 +2394,11 @@
 
     cont.appendChild(h('div', { class: 'panel' },
       h('h2', { text: 'Nuevo escrito' }),
-      h('label', { class: 'etiqueta', for: 'man-tipo', text: 'Tipo de escrito' }), sel,
+      h('label', { class: 'etiqueta', for: 'man-modelo', text: 'Modelo de escrito (' + Modelos.lista().length + ', en orden alfabético)' }), buscarM, listaM,
       h('label', { class: 'etiqueta', for: 'man-expte', text: 'Expediente o deudor' }), inp, lista,
-      h('p', { class: 'ayuda chica', text: 'Más tipos de escritos se suman a medida que se sellen sus modelos.' })));
+      h('p', { class: 'ayuda chica', text: 'Más modelos se suman a medida que se sellen.' })));
     cont.appendChild(h('div', { id: 'man-eleccion' }));
+    pintarModelos();
     if (!manual.fila) mostrarCoincidencias();
     pintarEleccion();
   }
@@ -2390,9 +2406,10 @@
   function elegirJuicio(f) {
     manual.fila = f; manual.texto = f.e; manual.previa = null; manual.resultado = null; manual.error = '';
     var inp = $('man-expte'); if (inp) inp.value = f.e;
-    var lista = document.querySelector('.man-lista'); if (lista) lista.textContent = '';
+    var lista = $('man-juicios'); if (lista) lista.textContent = '';
     pintarEleccion();
     var tipo = manual.tipo;
+    if (!tipo) return;   // falta elegir el modelo
     api({ a: 'previa', e: f.e, t: tipo }).then(function (p) {
       if (manual.fila !== f || manual.tipo !== tipo) return;
       if (p.ok && esModelo(tipo) && !p.modelo) {
@@ -2447,6 +2464,7 @@
       return;
     }
     if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
+    if (!manual.tipo) { caja.appendChild(h('p', { class: 'ayuda', text: 'Elegí arriba el modelo de escrito.' })); return; }
     if (!manual.previa) { caja.appendChild(h('div', { class: 'cargando-txt', text: manual.tipo === 'COMUNICO_IVP' ? 'Buscando el IVP en Gmail y consultando el SAE…' : 'Consultando el SAE…' })); return; }
 
     var p = manual.previa;
@@ -2485,8 +2503,28 @@
   /** Modelo sellado: encabezado, carátula y Nº salen del juicio; título y cuerpo se editan acá antes de generar. */
   function pintarModelo(caja, tarjeta, f, p) {
     var m = p.modelo;
-    if (!manual.ed) manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [] };
+    var campos = m.campos || [];
+    if (!manual.ed) {
+      var auto = { demandado: f.d, cuit: f.c, hoy: isoADmy(hoyInput()) }, iniciales = {};
+      campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
+      manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales };
+    }
     var ed = manual.ed;
+    // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
+    var armado = function (conArchivos) {
+      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos,
+                                          archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c } });
+    };
+    var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
+    var actualizarVista = function () {
+      if (!campos.length) return;
+      vista.textContent = '';
+      var r = armado(false);
+      if (!r.ok) { vista.appendChild(h('div', { class: 'error', text: r.error })); return; }
+      vista.appendChild(h('div', { class: 'ayuda chica', text: 'Así queda:' }));
+      vista.appendChild(h('b', { text: r.titulo }));
+      r.cuerpo.forEach(function (x) { vista.appendChild(h('p', { text: x })); });
+    };
     tarjeta.appendChild(h('div', { class: 'ayuda chica', style: 'margin-top:6px', text: p.encabezado }));
     if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', text: p.sae.caratula }));
     if (!p.sae.encontrado) caja.appendChild(h('div', { class: 'alerta', text: 'El expediente no se encontró en el SAE: el encabezado sale de la nominación del MAESTRO (OGA N° 1). Revisalo en el PDF.' }));
@@ -2497,8 +2535,16 @@
     var cuerpo = h('textarea', { id: 'mod-cuerpo', class: 'campo-form', rows: '8' });
     cuerpo.value = ed.cuerpo;
     var arca = h('input', { type: 'checkbox', checked: ed.arca });
-    titulo.addEventListener('input', function () { ed.titulo = titulo.value; });
-    cuerpo.addEventListener('input', function () { ed.cuerpo = cuerpo.value; });
+    titulo.addEventListener('input', function () { ed.titulo = titulo.value; actualizarVista(); });
+    cuerpo.addEventListener('input', function () { ed.cuerpo = cuerpo.value; actualizarVista(); });
+    var datos = [];   // etiqueta + casilla de cada dato (h() aplana un solo nivel)
+    campos.forEach(function (c, i) {
+      var inp = h('input', { id: 'mod-campo-' + i, class: 'campo-form', autocomplete: 'off', value: ed.campos[c.id] || '',
+                             inputmode: c.tipo === 'monto' ? 'decimal' : c.tipo === 'cuit' ? 'numeric' : null,
+                             placeholder: c.tipo === 'fecha' ? 'dd/mm/aaaa' : c.tipo === 'monto' ? 'Ej. 15.500 o 85.870,33' : '' });
+      inp.addEventListener('input', function () { ed.campos[c.id] = inp.value; actualizarVista(); });
+      datos.push(h('label', { class: 'etiqueta', for: 'mod-campo-' + i, text: c.etiqueta + ' → {' + c.id + '}' }), inp);
+    });
     arca.addEventListener('change', function () { ed.arca = arca.checked; });
 
     var agregados = Object.keys(m.agregados || {}).map(function (k) {
@@ -2531,8 +2577,10 @@
     }
 
     caja.appendChild(h('div', { class: 'panel form-hon' },
+      campos.length ? h('div', { class: 'ayuda chica', text: 'Datos del escrito: van donde el texto dice {…}.' }) : null, datos,
       h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' }), titulo,
       h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' }), cuerpo,
+      vista,
       subir,
       h('label', { class: 'check-hon' }, arca, ' Unir la constancia de ARCA del mes'),
       h('div', { class: 'botones', style: 'margin-top:8px' }, agregados, volver),
@@ -2541,13 +2589,12 @@
     var btn = h('button', { class: 'btn primario', type: 'button', disabled: manual.generando }, manual.generando ? 'Generando…' : 'Generar escrito');
     btn.addEventListener('click', function () {
       var parrafos = ed.cuerpo.split(/\n\s*\n/).map(function (x) { return x.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
-      if (!ed.titulo.trim()) { aviso('Falta el título del escrito'); titulo.focus(); return; }
-      if (!parrafos.length) { aviso('El cuerpo del escrito está vacío'); cuerpo.focus(); return; }
-      if (m.adjunto && !ed.archivos.length) { aviso('Falta subir: ' + m.adjunto.etiqueta.toLowerCase()); return; }
+      var control = armado(true);
+      if (!control.ok) { aviso(control.error); return; }
       if (p.pendiente && !confirm('Ya hay un escrito para firmar de este expediente. ¿Generar igual?')) return;
       manual.generando = true; pintarEleccion();
       Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
-        return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, archivos: archivos });
+        return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, campos: ed.campos, archivos: archivos });
       }).then(function (r) {
         manual.generando = false;
         r.sinArca = !ed.arca && !ed.archivos.length;
@@ -2558,6 +2605,7 @@
       }).catch(function (e) { manual.generando = false; aviso(traducirError(e)); pintarEleccion(); });   // lo editado no se pierde
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
+    actualizarVista();
   }
 
   // ───────── Configuración ─────────
