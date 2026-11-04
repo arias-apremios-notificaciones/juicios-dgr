@@ -543,6 +543,14 @@
     { id: 'ivp', nombre: 'Cancelaciones (IVP)', es: function (x) { return /^COMUNICO/.test(x.tipo); } },
     { id: 'otros', nombre: 'Honorarios y otros', es: function () { return true; } }
   ];
+  // Qué lleva unido el PDF: anexo viene del servidor (Motor.gs, anexo_); los servidores viejos solo mandan adjunto.
+  var NOMBRE_ANEXO = { IVP: 'IVP', ARCA: 'ARCA', ADJUNTO: 'adjunto', 'ADJUNTO + ARCA': 'adjunto y ARCA' };
+  function chipAnexo(x) {
+    if (x.anexo === undefined) return x.arca ? (x.adjunto ? '📎 con IVP' : '📎 con ARCA') : (x.adjunto ? 'uniendo IVP…' : 'sin ARCA');
+    if (!x.anexo) return 'sin adjuntos';
+    if (x.arca) return '📎 con ' + NOMBRE_ANEXO[x.anexo];
+    return /ARCA/.test(x.anexo) ? 'sin ARCA' : 'uniendo ' + NOMBRE_ANEXO[x.anexo] + '…';
+  }
   function grupoFirmar(x) { return GRUPOS_FIRMAR.filter(function (g) { return g.es(x); })[0].id; }
 
   // Tarjeta grande que abre una sección (Para firmar y Agenda), como los botones del portal del SAE.
@@ -958,8 +966,8 @@
       h('div', { class: 'meta' },
         h('span', { class: 'expte', text: 'Expte. ' + x.e }),
         h('span', { class: 'chip-tipo' + (/REITERO/.test(x.tipo) ? ' reitero' : /^COMUNICO/.test(x.tipo) ? ' cancela' : ''),
-                    text: /REITERO/.test(x.tipo) ? 'REITERO' : /^COMUNICO/.test(x.tipo) ? x.tipo.replace(/ DE LA DEUDA/, '') : /SENTENCIA/.test(x.tipo) ? 'PIDO SENTENCIA' : x.tipo }),
-        h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: x.arca ? (x.adjunto ? '📎 con IVP' : '📎 con ARCA') : (x.adjunto ? 'uniendo IVP…' : 'sin ARCA') }),
+                    text: /REITERO/.test(x.tipo) ? 'REITERO' : /^COMUNICO/.test(x.tipo) ? x.tipo.replace(/ DE LA DEUDA/, '') : /^PEDIDO DE SENTENCIA$/.test(x.tipo) ? 'PIDO SENTENCIA' : x.tipo }),
+        h('span', { class: 'chip-arca' + (x.arca ? '' : ' falta'), text: chipAnexo(x) }),
         x.nuevoEstado ? h('span', { class: 'ayuda chica', text: 'Al presentar: ESTADO → ' + x.nuevoEstado }) : null,
         h('span', { text: x.motivo })),
       x.aviso ? h('div', { class: 'alerta', text: '⚠ ' + x.aviso }) : null,
@@ -1627,7 +1635,7 @@
         fr.readAsDataURL(blob);
       });
     };
-    if (!/^image\/(jpeg|png)$/.test(mime) || f.size < 1500000) {
+    if (!/^image\//.test(mime) || /^image\/(jpeg|png)$/.test(mime) && f.size < 1500000) {   // HEIC y fotos grandes: a JPG
       if (f.size > MAX_COMPROBANTE) return Promise.reject(new Error('El archivo pesa más de 15 MB'));
       return leerB64(f).then(function (d) { return { mime: mime, datos: d }; });
     }
@@ -2005,8 +2013,9 @@
   var TIPOS_ESCRITO = [{ id: 'PEDIDO_SENTENCIA', nombre: 'Pedido de sentencia' },
                        { id: 'COMUNICO_IVP', nombre: 'Comunicación de cancelación (IVP)' },
                        // Modelos sellados de la carpeta MODELOS PARA LA APP (Modelos.js): título y cuerpo editables.
-                       { id: 'DEVUELVO_CEDULA_LEY', nombre: 'Devuelvo cédula ley diligenciada', modelo: true }];
-  // ed: el título y el cuerpo del modelo tal como los dejó Carlos (null = todavía sin tocar)
+                       { id: 'DEVUELVO_CEDULA_LEY', nombre: 'Devuelvo cédula ley diligenciada', modelo: true },
+                       { id: 'DEVUELVO_OFICIO_RI', nombre: 'Devuelvo oficio diligenciado al RI', modelo: true }];
+  // ed: el título, el cuerpo y los archivos a unir del modelo tal como los dejó Carlos (null = todavía sin tocar)
   var manual = { tipo: 'PEDIDO_SENTENCIA', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null };
   function esModelo(tipo) { return TIPOS_ESCRITO.some(function (t) { return t.id === tipo && t.modelo; }); }
 
@@ -2402,7 +2411,7 @@
     if (intento > 12) { r.unido = false; r.arca = false; pintarEleccion(); return; }
     setTimeout(function () {
       api({ a: 'escritos' }).then(function (d) {
-        var x = (d.porFirmar || []).filter(function (y) { return y.e === r.escrito.e && y.arca; })
+        var x = (d.porFirmar || []).filter(function (y) { return (r.escrito.id ? y.id === r.escrito.id : y.e === r.escrito.e) && y.arca; })
                                    .sort(function (a, b) { return a.generado < b.generado ? 1 : -1; })[0];
         if (x && manual.resultado === r) { r.unido = true; r.escrito.url = x.url; pintarEleccion(); }
         else esperarArca(r, intento + 1);
@@ -2427,9 +2436,9 @@
       var esperando = r.arca && !r.unido;
       caja.appendChild(h('div', { class: 'panel caja-ok' },
         h('b', { text: '✓ Escrito generado' }),
-        esperando ? h('div', { class: 'cargando-txt', text: 'Uniendo la constancia de ARCA… (menos de un minuto)' })
+        esperando ? h('div', { class: 'cargando-txt', text: 'Uniendo ' + (r.anexo || 'la constancia de ARCA') + '… (menos de un minuto)' })
                   : h('div', { text: r.sinArca ? 'Listo. También está en Para firmar.'
-                                             : r.unido ? 'Listo: un solo PDF con el escrito y la constancia de ARCA. También está en Para firmar.'
+                                             : r.unido ? 'Listo: un solo PDF con el escrito y ' + (r.anexo || 'la constancia de ARCA') + '. También está en Para firmar.'
                                              : 'Falta la constancia de ARCA del mes: guardala en su carpeta y se une sola.' }),
         h('div', { class: 'botones', style: 'margin-top:8px' },
           esperando ? null : h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
@@ -2476,7 +2485,7 @@
   /** Modelo sellado: encabezado, carátula y Nº salen del juicio; título y cuerpo se editan acá antes de generar. */
   function pintarModelo(caja, tarjeta, f, p) {
     var m = p.modelo;
-    if (!manual.ed) manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca };
+    if (!manual.ed) manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [] };
     var ed = manual.ed;
     tarjeta.appendChild(h('div', { class: 'ayuda chica', style: 'margin-top:6px', text: p.encabezado }));
     if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', text: p.sae.caratula }));
@@ -2501,11 +2510,30 @@
         pintarEleccion();
       } }, ag.nombre);
     });
-    var volver = h('button', { class: 'btn', type: 'button', onclick: function () { manual.ed = null; pintarEleccion(); } }, 'Volver al modelo');
+    var volver = h('button', { class: 'btn', type: 'button', onclick: function () { var a = ed.archivos; manual.ed = null; pintarModelo.archivos = a; pintarEleccion(); } }, 'Volver al modelo');
+    if (pintarModelo.archivos) { ed.archivos = pintarModelo.archivos; pintarModelo.archivos = null; }   // "Volver al modelo" no borra lo subido
+
+    // Lo que se une detrás del escrito (cédula, informe del RI…): PDF o fotos, en el orden en que se eligen.
+    var subir = null;
+    if (m.adjunto) {
+      var elegir = h('input', { id: 'mod-archivo', class: 'campo-form', type: 'file', multiple: true, accept: 'application/pdf,image/*' });
+      elegir.addEventListener('change', function () {
+        ed.archivos = ed.archivos.concat(Array.prototype.slice.call(elegir.files));
+        pintarEleccion();
+      });
+      subir = h('div', { class: 'campo-rh' },
+        h('label', { class: 'etiqueta', for: 'mod-archivo', text: m.adjunto.etiqueta + ' (se une detrás del escrito: PDF o fotos)' }), elegir,
+        ed.archivos.map(function (a, i) {
+          return h('div', { class: 'meta' }, '📎 ' + a.name + ' · ' + (a.size / 1048576).toFixed(1) + ' MB ',
+            h('button', { class: 'btn chico', type: 'button', 'aria-label': 'Quitar ' + a.name, onclick: function () { ed.archivos.splice(i, 1); pintarEleccion(); } }, 'Quitar'));
+        }),
+        ed.archivos.length ? null : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
+    }
 
     caja.appendChild(h('div', { class: 'panel form-hon' },
       h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' }), titulo,
       h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' }), cuerpo,
+      subir,
       h('label', { class: 'check-hon' }, arca, ' Unir la constancia de ARCA del mes'),
       h('div', { class: 'botones', style: 'margin-top:8px' }, agregados, volver),
       h('p', { class: 'ayuda chica', text: 'Encabezado, carátula, comparecencia y cierre los pone el sistema. Los cambios valen solo para este escrito: el modelo queda como está.' })));
@@ -2515,11 +2543,15 @@
       var parrafos = ed.cuerpo.split(/\n\s*\n/).map(function (x) { return x.replace(/\s+/g, ' ').trim(); }).filter(Boolean);
       if (!ed.titulo.trim()) { aviso('Falta el título del escrito'); titulo.focus(); return; }
       if (!parrafos.length) { aviso('El cuerpo del escrito está vacío'); cuerpo.focus(); return; }
+      if (m.adjunto && !ed.archivos.length) { aviso('Falta subir: ' + m.adjunto.etiqueta.toLowerCase()); return; }
       if (p.pendiente && !confirm('Ya hay un escrito para firmar de este expediente. ¿Generar igual?')) return;
       manual.generando = true; pintarEleccion();
-      apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca }).then(function (r) {
+      Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
+        return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, archivos: archivos });
+      }).then(function (r) {
         manual.generando = false;
-        r.sinArca = !ed.arca;
+        r.sinArca = !ed.arca && !ed.archivos.length;
+        r.anexo = [ed.archivos.length ? m.adjunto.etiqueta.toLowerCase() : '', ed.arca ? 'la constancia de ARCA' : ''].filter(Boolean).join(' y ');
         manual.resultado = r; manual.ed = null; pintarEleccion();
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
         if (r.arca) esperarArca(r, 0);
