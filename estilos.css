@@ -206,6 +206,20 @@ ol.ayuda { padding-left: 20px; }
 .avanzado { margin-top: 10px; }
 .avanzado summary { cursor: pointer; color: var(--enfasis); font-size: 14px; }
 .acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+/* Ayuda (botón "?") */
+.hoja input.ayuda-q { font-family: inherit; font-size: 16px; margin: 4px 0 8px; }
+.ayuda-secciones { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.ayuda-secciones button { font-size: 13px; padding: 5px 10px; }
+.ayuda-item { border: 1px solid var(--borde); border-radius: var(--radio); margin-bottom: 6px; background: var(--superficie); }
+.ayuda-item summary { cursor: pointer; padding: 10px 12px; font-weight: 600; font-size: 15px; list-style: none; display: flex; gap: 8px; align-items: baseline; }
+.ayuda-item summary::-webkit-details-marker { display: none; }
+.ayuda-item summary::before { content: '›'; color: var(--azul); transition: transform .15s; display: inline-block; }
+.ayuda-item[open] summary::before { transform: rotate(90deg); }
+.ayuda-item .ayuda-seccion { font-size: 11.5px; font-weight: 600; color: var(--texto-2); margin-left: auto; white-space: nowrap; }
+.ayuda-resp { padding: 0 12px 10px 28px; font-size: 14.5px; line-height: 1.5; }
+.ayuda-resp ol, .ayuda-resp ul { padding-left: 18px; margin: 4px 0; }
+.ayuda-resp li { margin-bottom: 3px; }
+.ayuda-resp p { margin: 4px 0; }
 .doc-texto { white-space: pre-wrap; font-size: 14.5px; line-height: 1.5; overflow-wrap: anywhere; }
 
 .aviso {
@@ -356,6 +370,7 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .tabla-deuda th, .tabla-deuda td { text-align: left; padding: 6px 4px; border-bottom: 1px solid var(--borde); vertical-align: top; }
 .tabla-deuda th { font-size: 12.5px; color: var(--texto-2); font-weight: 600; }
 .tabla-deuda .nro-boleta { font-variant-numeric: tabular-nums; color: var(--texto-2); font-size: 13px; }
+.tabla-deuda .concepto-boleta { font-size: 13px; line-height: 1.35; margin: 2px 0; user-select: text; -webkit-user-select: text; }
 .tabla-deuda .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .tabla-deuda tfoot td { font-weight: 700; border-bottom: 0; }
 .ok-deuda { color: var(--e-verde-tx); font-size: 13.5px; margin: 4px 0; }
@@ -517,3 +532,8 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .tab-pista { height: 12px; }
 .tab-relleno { display: block; height: 12px; background: var(--serie-1); border-radius: 0 4px 4px 0; }
 .tab-num { color: var(--texto); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Cuenta de la DGR para transferencias (Escritos) */
+.cuenta-dgr summary { cursor: pointer; }
+.cuenta-dgr-datos { white-space: pre-wrap; font: inherit; font-size: 14px; line-height: 1.5; margin: 10px 0 6px; padding: 10px 12px;
+  background: var(--fondo); border-radius: 8px; user-select: text; -webkit-user-select: text; }

@@ -85,7 +85,7 @@ var Impresion = (function () {
   // ───────── 1. Detalle de deuda (para entregar al demandado) ─────────
   function deuda(d, f) {
     var filas = d.boletas.map(function (b) {
-      return [b.numero, [b.impuesto, b.detalle].filter(Boolean).join(' — ') +
+      return [b.numero, [b.impuesto, b.concepto || b.detalle].filter(Boolean).join(' — ') +
               (b.original != null ? ' (original ' + pesos(b.original) + ' + intereses ' + pesos(b.intereses) + (b.al ? ' al ' + b.al : '') + ')' : ''),
               b.padron.replace(/^(Padrón|Dominio) /, ''), b.periodos, b.importe != null ? pesos(b.importe) : '—'];
     });

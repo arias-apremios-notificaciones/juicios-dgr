@@ -105,6 +105,7 @@
     estado.indice = Buscador.indexar(estado.filas);
     estado.generado = datos.generado;
     estado.maestro = datos.maestro || null;
+    estado.cuentaDgr = datos.cuentaDgr || null;
     var b = $('btn-maestro');
     if (estado.maestro && estado.maestro.url) { b.href = estado.maestro.url; b.hidden = false; }
     actualizarBtnHon();
@@ -308,7 +309,8 @@
       var tb = h('tbody');
       d.boletas.forEach(function (b) {
         tb.appendChild(h('tr', null,
-          h('td', null, h('div', { class: 'nro-boleta', text: b.numero }), h('b', { text: b.impuesto || '—' }), b.detalle ? h('div', { class: 'ayuda chica', text: b.detalle }) : null,
+          h('td', null, h('div', { class: 'nro-boleta', text: b.numero }), h('b', { text: b.impuesto || '—' }),
+            b.concepto || b.detalle ? h('div', { class: 'concepto-boleta', text: b.concepto || b.detalle }) : null,   // concepto: texto completo de la demanda
             h('div', { class: 'ayuda chica', text: [b.padron, b.periodos].filter(Boolean).join(' · ') }),
             b.original != null ? h('div', { class: 'ayuda chica', text: 'Original ' + importe(b.original) + ' + intereses ' + importe(b.intereses) + (b.al ? ' (al ' + b.al + ')' : '') }) : null),
           h('td', { class: 'num', text: b.importe != null ? importe(b.importe) : '—' })));
@@ -337,6 +339,7 @@
     var l = ['DETALLE DE LA DEUDA', d.caratula || f.d, 'Expte. ' + f.e + (d.juzgado ? ' · ' + d.juzgado : ''), ''];
     d.boletas.forEach(function (b) {
       l.push('• Boleta ' + b.numero + ' · ' + (b.impuesto || '') + (b.padron ? ' · ' + b.padron : '') + (b.periodos ? ' · ' + b.periodos : '') + (b.importe != null ? ' · ' + importe(b.importe) : ''));
+      if (b.concepto) l.push('  Concepto: ' + b.concepto);
     });
     l.push('', 'Total reclamado en la demanda: ' + (d.total != null ? importe(d.total) : '—'));
     l.push('Importes a la fecha de emisión de las boletas; se agregan los intereses hasta la fecha de pago.');
@@ -2626,9 +2629,29 @@
       h('label', { class: 'etiqueta', for: 'man-expte', text: 'Expediente o deudor' }), inp, lista,
       h('p', { class: 'ayuda chica', text: 'Más modelos se suman a medida que se sellen.' })));
     cont.appendChild(h('div', { id: 'man-eleccion' }));
+    var cta = panelCuentaDgr();
+    if (cta) cont.appendChild(cta);
     pintarModelos();
     if (!manual.fila) mostrarCoincidencias();
     pintarEleccion();
+  }
+
+  /**
+   * Cuenta de la DGR para transferencias, lista para copiar y pegar (pedido de Carlos del 05/11/2026).
+   * Los datos vienen del servidor con los del MAESTRO: el código público de la app no los tiene.
+   */
+  function panelCuentaDgr() {
+    var c = estado.cuentaDgr;
+    if (!c) return null;
+    var bloque = ['Titular: ' + c.titular, 'CUIT: ' + c.cuit, 'Banco: ' + c.banco, 'Cuenta N° ' + c.cuenta, 'CBU: ' + c.cbu].join('\n');
+    return h('details', { class: 'panel cuenta-dgr' },
+      h('summary', null, h('b', { text: 'Cuenta de la DGR para transferencias' })),
+      h('pre', { class: 'cuenta-dgr-datos', text: bloque }),
+      h('div', { class: 'ayuda chica', text: 'Para el escrito: "…' + c.frase + '".' }),
+      h('div', { class: 'botones' },
+        h('button', { class: 'btn primario', type: 'button', onclick: function () { copiar(c.frase, 'Copiado: texto para el escrito'); } }, 'Copiar para escrito'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { copiar(bloque, 'Copiados los datos de la cuenta'); } }, 'Copiar datos (mail)'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { copiar(c.cbu, 'CBU copiado'); } }, 'Copiar CBU')));
   }
 
   function elegirJuicio(f) {
@@ -2943,8 +2966,51 @@
       copiar(estado.cfg.u + '?a=voz&k=' + encodeURIComponent(estado.cfg.k) + '&q=', 'Enlace copiado');
     });
     $('doc-cerrar').addEventListener('click', function () { $('dlg-doc').close(); });
-    ['dlg-config', 'dlg-doc'].forEach(function (id) {
+    $('btn-ayuda').addEventListener('click', abrirAyuda);
+    $('ayuda-cerrar').addEventListener('click', function () { $('dlg-ayuda').close(); });
+    $('ayuda-q').addEventListener('input', pintarAyuda);
+    ['dlg-config', 'dlg-doc', 'dlg-ayuda'].forEach(function (id) {
       $(id).addEventListener('click', function (ev) { if (ev.target === ev.currentTarget) ev.currentTarget.close(); });
+    });
+  }
+
+  // ───────── Ayuda (botón "?"): guía con buscador, en ayuda.js. Funciona sin conexión. ─────────
+  var ayuda = { seccion: '' };
+
+  function abrirAyuda() {
+    // Abre en la sección de la pestaña en la que está Carlos (si tiene preguntas).
+    ayuda.seccion = Ayuda.seccionDeVista(estado.vista) || '';
+    $('ayuda-q').value = '';
+    pintarAyuda();
+    $('dlg-ayuda').showModal();
+    if (matchMedia('(pointer: fine)').matches) $('ayuda-q').focus();
+  }
+
+  function pintarAyuda() {
+    var texto = $('ayuda-q').value.trim(), secc = $('ayuda-secciones'), lista = $('ayuda-lista');
+    secc.textContent = '';
+    lista.textContent = '';
+    [{ id: '', nombre: 'Todas' }].concat(Ayuda.SECCIONES).forEach(function (s) {
+      secc.appendChild(h('button', { type: 'button', class: ayuda.seccion === s.id && !texto ? 'activo' : '',
+                                     onclick: function () { ayuda.seccion = s.id; $('ayuda-q').value = ''; pintarAyuda(); } }, s.nombre));
+    });
+    var res = texto ? Ayuda.buscar(texto) : Ayuda.deSeccion(ayuda.seccion);
+    if (!res.length) {
+      lista.appendChild(h('p', { class: 'ayuda', text: 'No encontré nada con esas palabras. Probá con otras (por ejemplo: "embargo", "PIN", "imprimir") o elegí una sección.' }));
+      return;
+    }
+    if (texto) lista.appendChild(h('p', { class: 'ayuda chica', text: res.length === 1 ? '1 respuesta' : res.length + ' respuestas' }));
+    res.forEach(function (e, i) {
+      var resp = h('div', { class: 'ayuda-resp' }, e.texto.map(function (p) { return h('p', { text: p }); }),
+        e.pasos ? h('ol', null, e.pasos.map(function (p) { return h('li', { text: p }); })) : null,
+        e.id === 'modelos-lista' ? h('ul', null, Modelos.lista().map(function (t) { return h('li', { text: t.nombre }); })) : null,
+        e.nota ? h('p', { class: 'ayuda chica', text: e.nota }) : null,
+        e.ir ? h('div', { class: 'botones', style: 'margin-top:6px' }, h('button', { class: 'btn chico', type: 'button', onclick: function () {
+          $('dlg-ayuda').close(); cambiarVista(e.ir);
+        } }, 'Ir a ' + Ayuda.nombreVista(e.ir) + ' ›')) : null);
+      var d = h('details', { class: 'ayuda-item', open: !!texto && i === 0 && res.length <= 3 },
+        h('summary', null, h('span', { text: e.pregunta }), texto || !ayuda.seccion ? h('span', { class: 'ayuda-seccion', text: Ayuda.nombreSeccion(e.seccion) }) : null), resp);
+      lista.appendChild(d);
     });
   }
 
