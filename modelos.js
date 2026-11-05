@@ -28,7 +28,7 @@ var Modelos = (function () {
    * Cada modelo: nombre (= título, como se lista), claves (para el buscador), titulo, presentacion, cuerpo, arca,
    * adjunto (lo que Carlos sube y se une detrás del escrito), campos (datos entre llaves), calcular, seguimiento, cierre,
  * requisitos (lo que Carlos confirma en la app antes de generar).
-   * Campos: tipo texto | fecha | monto | cuit | opciones (desplegable, con "Otro" a mano); auto: demandado | cuit | hoy (se completa solo con el MAESTRO / la fecha de hoy).
+   * Campos: tipo texto | fecha | monto | cuit | anio (4 números) | opciones (desplegable, con "Otro" a mano); auto: demandado | cuit | hoy (se completa solo con el MAESTRO / la fecha de hoy).
  * variantes: cuerpos alternativos que se eligen en la app (el primero es el del modelo).
    */
   var MODELOS = {
@@ -115,10 +115,12 @@ var Modelos = (function () {
       cuerpo: [
         'Atento al estado procesal de la presente causa y encontrándose debidamente notificada y firme la sentencia de trance y remate, sin que la demandada haya cancelado la misma, y al no conocer bienes susceptibles de embargo de {DEMANDADO}, CUIT {CUIT}, vengo a solicitar que por vuestro intermedio se libren los pertinentes Oficios a fines de establecer si existen bienes para poder ejecutar la Sentencia recaída en autos, a saber:',
         'Se Oficie a la Dirección de Registro Inmobiliario a los fines de indicar si existen Inmuebles inscriptos a nombre de la accionada.',
-        'Se oficie a ARCA a los fines de que indique si posee inscripción en dicho Organismo Fiscal, en qué actividades se encuentra inscripta en su caso y si presenta y paga las declaraciones juradas de IVA desde el año 2020 a la fecha.'
+        'Se oficie a ARCA a los fines de que indique si posee inscripción en dicho Organismo Fiscal, en qué actividades se encuentra inscripta en su caso y si presenta y paga las declaraciones juradas de IVA desde el año {DESDE EL AÑO} a la fecha.'
       ],
       campos: [{ id: 'DEMANDADO', etiqueta: 'Demandado', tipo: 'texto', auto: 'demandado' },
-               { id: 'CUIT', etiqueta: 'CUIT del demandado', tipo: 'cuit', auto: 'cuit' }]
+               { id: 'CUIT', etiqueta: 'CUIT del demandado', tipo: 'cuit', auto: 'cuit' },
+               // El año era fijo (2020); Carlos pidió el 05/11/2026 que sea un dato a completar.
+               { id: 'DESDE EL AÑO', etiqueta: 'Año desde el que se piden las DDJJ de IVA a ARCA', tipo: 'anio' }]
     },
     // "AGRO TIUN S.R.L. (167-13) - ACOMPAÑO CONSTANCIA": la constancia de ARCA es la del mes, la que ya usa el pedido de sentencia.
     ACOMPANO_CONSTANCIA: {
@@ -165,7 +167,7 @@ var Modelos = (function () {
       titulo: 'COMUNICO ESTADO DE LA DEUDA',
       presentacion: ', apoderado de la parte actora, a V.S. respetuosamente digo:',
       cuerpo: ESTADO_DEUDA_PARCIAL,
-      // Carlos pidió la variante sin pagos (04/11/2026); en la app se elige y reemplaza el cuerpo.
+      // Carlos pidió la variante sin pagos (04/11/2026) y la selló el 05/11/2026; en la app se elige y reemplaza el cuerpo.
       variantes: [{ nombre: 'Con pago parcial', cuerpo: ESTADO_DEUDA_PARCIAL }, { nombre: 'Sin pagos', cuerpo: ESTADO_DEUDA_SIN_PAGOS }],
       campos: [{ id: 'IVP N°', etiqueta: 'N° del IVP (ej. I 202609577)', tipo: 'texto' },
                { id: 'BOLETA DE DEUDA', etiqueta: 'Boleta de deuda (ej. BCOT/3053/2025)', tipo: 'texto' },
@@ -302,6 +304,9 @@ var Modelos = (function () {
         v[c.id] = pesos(n[c.id]);
       } else if (c.tipo === 'fecha') {
         if (!(v[c.id] = fecha(crudo))) return { error: nombre + ': la fecha tiene que ser dd/mm/aaaa.' };
+      } else if (c.tipo === 'anio') {
+        v[c.id] = crudo.replace(/\D/g, '');
+        if (!/^(19|20)\d{2}$/.test(v[c.id])) return { error: nombre + ': el año tiene que tener 4 números (ej. 2020).' };
       } else if (c.tipo === 'cuit') {
         v[c.id] = crudo.replace(/\D/g, '');
         if (!/^\d{11}$/.test(v[c.id])) return { error: 'El CUIT tiene que tener 11 números.' };

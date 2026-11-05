@@ -2810,8 +2810,8 @@
         return;
       }
       var inp = h('input', { id: 'mod-campo-' + i, class: 'campo-form', autocomplete: 'off', value: ed.campos[c.id] || '',
-                             inputmode: c.tipo === 'monto' ? 'decimal' : c.tipo === 'cuit' ? 'numeric' : null,
-                             placeholder: c.tipo === 'fecha' ? 'dd/mm/aaaa' : c.tipo === 'monto' ? 'Ej. 15.500 o 85.870,33' : '' });
+                             inputmode: c.tipo === 'monto' ? 'decimal' : c.tipo === 'cuit' || c.tipo === 'anio' ? 'numeric' : null,
+                             placeholder: c.tipo === 'fecha' ? 'dd/mm/aaaa' : c.tipo === 'monto' ? 'Ej. 15.500 o 85.870,33' : c.tipo === 'anio' ? 'Ej. 2020' : '' });
       inp.addEventListener('input', function () { ed.campos[c.id] = inp.value; actualizarVista(); });
       datos.push(h('label', { class: 'etiqueta', for: 'mod-campo-' + i, text: c.etiqueta + ' → {' + c.id + '}' }), inp);
     });
