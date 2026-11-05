@@ -6,7 +6,7 @@
 (function () {
   'use strict';
 
-  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', firmar: 'jdgr.firmar', cola: 'jdgr.cola', drive: 'jdgr.subirDrive' };
+  var LS = { cfg: 'jdgr.cfg', datos: 'jdgr.datos', recientes: 'jdgr.recientes', agenda: 'jdgr.agenda', seg: 'jdgr.seg', firmar: 'jdgr.firmar', cola: 'jdgr.cola', drive: 'jdgr.subirDrive' };
   var PORTAL_SAE = 'https://consultaexpedientes.justucuman.gov.ar/';
   var REFRESCO_MS = 5 * 60 * 1000;
 
@@ -108,6 +108,7 @@
     var b = $('btn-maestro');
     if (estado.maestro && estado.maestro.url) { b.href = estado.maestro.url; b.hidden = false; }
     actualizarBtnHon();
+    actualizarAlertasSeg();   // los avisos de Seguimientos dependen del estado y los movimientos del MAESTRO
   }
 
   /** Enlace al MAESTRO posicionado en la fila del juicio (para editarlo directo). */
@@ -255,7 +256,11 @@
       });
     });
     det.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 8px' }, btnImp,
-      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoAgenda({ e: f.e, d: f.d }); } }, 'Agendar')));
+      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoAgenda({ e: f.e, d: f.d }); } }, 'Agendar'),
+      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoSeguido({ e: f.e, d: f.d }); } }, 'Seguir')));
+    var listasDe = seg.datos ? Seguimientos.activos(seg.datos).filter(function (s) { return s.e === f.e; })
+      .map(function (s) { return (Seguimientos.lista(seg.datos, s.lista) || {}).nombre; }).filter(Boolean) : [];
+    if (listasDe.length) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:-4px 0 8px', text: '👁 En seguimiento: ' + listasDe.join(' · ') }));
 
     // 1) SEGUIMIENTO del MAESTRO, completo (lo que anotó Carlos), la línea más reciente primero.
     var ul = h('ul', { class: 'lista-seg' });
@@ -642,7 +647,7 @@
   function enviarCola() {
     if (cola.enviando || !cola.items.length || !hayRed() || !estado.cfg) return Promise.resolve();
     cola.enviando = true;
-    var enviados = 0, rechazados = [], agendaResp = null, firmarCambio = false;
+    var enviados = 0, rechazados = [], agendaResp = null, segResp = null, firmarCambio = false;
     var sacar = function (x) { cola.items = cola.items.filter(function (y) { return y.id !== x.id; }); guardar(LS.cola, cola.items); };
     var paso = function () {
       var x = cola.items[0];
@@ -650,6 +655,7 @@
       return apiPost(x.cuerpo).then(function (r) {
         sacar(x); enviados++;
         if (r && r.items) agendaResp = r;
+        if (r && r.seguidos) segResp = r;
         if (x.cuerpo.a === 'presentado' || x.cuerpo.a === 'descartar') firmarCambio = true;
         return paso();
       }, function (e) {
@@ -666,6 +672,10 @@
       if (agendaResp && !cola.items.some(function (x) { return /^agenda/.test(x.cuerpo.a); })) {
         recibirAgenda(agendaResp);
         if (estado.vista === 'agenda' && !agenda.form) pintarAgenda();
+      }
+      if (segResp && !cola.items.some(function (x) { return /^seg/.test(x.cuerpo.a); })) {
+        recibirSeg(segResp);
+        if (estado.vista === 'seguimientos' && !seg.form) pintarSeg();
       }
       if (firmarCambio) { refrescar(true); if (estado.vista === 'firmar') cargarFirmar(); }
     });
@@ -694,6 +704,7 @@
     $('escritos').hidden = v !== 'escritos';
     $('honorarios').hidden = v !== 'honorarios';
     $('agenda').hidden = v !== 'agenda';
+    $('seguimientos').hidden = v !== 'seguimientos';
     $('tablero').hidden = v !== 'tablero';
     actualizarBarraAcciones();
     actualizarAlertasAgenda();
@@ -701,6 +712,7 @@
     else if (v === 'escritos') pintarEscritos();
     else if (v === 'honorarios') cargarHonorarios();
     else if (v === 'agenda') { pintarAgenda(); cargarAgenda(); }
+    else if (v === 'seguimientos') { pintarSeg(); cargarSeg(); }
     else if (v === 'tablero') pintarTablero();
     else render();
     window.scrollTo(0, 0);
@@ -2345,6 +2357,222 @@
     }
   }
 
+  // ───────── Seguimientos especiales (las reglas están en seguimientos.js) ─────────
+  // Listas propias de juicios para seguir de cerca: cada lista es una tarjeta. Funciona sin conexión igual que la Agenda.
+  var seg = { datos: null, error: '', grupo: null, form: null, filas: null, mapa: {} };   // grupo: lista abierta (null = las tarjetas)
+
+  function filaMaestro(e) {
+    if (seg.filas !== estado.filas) { seg.filas = estado.filas; seg.mapa = {}; estado.filas.forEach(function (f) { seg.mapa[f.e] = f; }); }
+    return seg.mapa[e] || null;
+  }
+  /** Estado y último movimiento del MAESTRO (sin los datos del MAESTRO todavía cargados no se avisa nada). */
+  function filaSeg(e) {
+    if (!estado.filas.length) return {};
+    var f = filaMaestro(e);
+    return f ? { g: f.g || '', ultMov: ultimoMovIso(f) } : null;
+  }
+  function datosSeg() { return seg.datos || { listas: [], seguidos: [] }; }
+
+  function actualizarAlertasSeg() {
+    var n = seg.datos ? Seguimientos.contarGraves(seg.datos, filaSeg, hoyInput()) : 0, c = $('cuenta-seg');
+    c.textContent = String(n);
+    c.hidden = !n;
+  }
+
+  function recibirSeg(d) {
+    seg.datos = { listas: d.listas, seguidos: d.seguidos };
+    seg.error = '';
+    guardar(LS.seg, seg.datos);
+    actualizarAlertasSeg();
+  }
+
+  function cargarSeg() {
+    if (!estado.cfg) return Promise.resolve();
+    return enviarCola().then(function () {
+      // Con cambios todavía sin enviar, la copia del teléfono es la que está al día.
+      if (cola.items.some(function (x) { return /^seg/.test(x.cuerpo.a); })) { var e = new Error('Sin conexión'); e.red = true; throw e; }
+      return api({ a: 'seguimientos' });
+    }).then(function (d) {
+      if (!d.listas) throw new Error('El servidor (Apps Script) todavía no tiene los Seguimientos: falta pegar el código nuevo y crear una "Nueva versión".');
+      recibirSeg(d);
+    }).catch(function (e) { seg.error = esDeRed(e) && seg.datos ? 'Sin conexión: podés seguir usando los seguimientos; los cambios se envían solos al volver la señal.' : traducirError(e); }).then(function () {
+      if (estado.vista === 'seguimientos' && !seg.form) pintarSeg();      // no le borra lo que está escribiendo
+    });
+  }
+
+  /** Manda el cambio. Primero lo prueba en el teléfono con las mismas reglas del servidor: sin señal queda así y se envía después. */
+  function cambiarSeg(cuerpo, desc) {
+    var local = Seguimientos.aplicar(datosSeg(), cuerpo, hoyInput());
+    if (!local.ok) { aviso(local.error); return Promise.resolve(false); }
+    return mandar(cuerpo, desc).then(function (d) {
+      recibirSeg(d || local.datos);
+      seg.form = null;
+      pintarSeg();
+      aviso(d ? d.aviso || local.aviso : local.aviso + ' (sin conexión: se envía al volver la señal)');
+      return true;
+    }).catch(function (e) { aviso(traducirError(e)); return false; });
+  }
+
+  function idSeg() { return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+
+  /** Desde la ficha del juicio ("Seguir") o desde la pestaña. */
+  function nuevoSeguido(datos) {
+    var ls = Seguimientos.activas(datosSeg());
+    seg.form = Object.assign({ tipo: 'seguido', lista: seg.grupo || (ls[0] && ls[0].id) || '', e: '', d: '', nota: '', revisar: '' }, datos || {});
+    if (estado.vista === 'seguimientos') { pintarSeg(); window.scrollTo(0, 0); } else cambiarVista('seguimientos');
+  }
+
+  function marcarSeg(s, accion) {
+    var f = filaSeg(s.e) || {};
+    return cambiarSeg({ a: 'segMarcar', id: s.id, accion: accion, fecha: hoyInput(), estadoRev: f.g || '', movRev: f.ultMov || '' },
+                      (accion === 'QUITAR' ? 'Quitar del seguimiento: ' : 'Revisado: ') + (s.d || s.e));
+  }
+
+  function tarjetaSeguido(x, hoy) {
+    var s = x.s, f = estado.filas.length ? filaMaestro(s.e) : null, ult = f ? Buscador.ultimaLinea(f.f) : null;
+    var toca = x.alertas.some(function (a) { return a.tipo === 'REVISAR'; });   // el atraso ya se lee en la línea de la revisión
+    return h('div', { class: 'item-agenda nivel-' + (toca ? 'vencido' : x.alertas.length ? 'cerca' : 'normal') },
+      h('div', { class: 'agenda-chips' },
+        f && f.g ? h('span', { class: 'estado ' + (COLOR_ESTADO[f.g] || ''), text: f.g }) : null,
+        x.alertas.filter(function (a) { return a.tipo !== 'REVISAR'; }).map(function (a) { return h('span', { class: 'chip-alerta' + (a.grave ? ' grave' : ''), text: a.texto }); })),
+      h('div', { class: 'agenda-titulo', text: s.d || 'Expte. ' + s.e }),
+      h('div', { class: 'agenda-cuando', text: Seguimientos.textoRevision(s, hoy) + (s.ultRevision ? ' · última: ' + Agenda.dmy(s.ultRevision) : '') }),
+      h('button', { class: 'agenda-expte', type: 'button', onclick: function () { verJuicio(s.e); } }, 'Expte. ' + s.e + ' · ver el juicio ›'),
+      ult && ult.texto ? h('div', { class: 'seg-ultimo', text: 'Último en el MAESTRO: ' + (ult.fecha ? ult.fecha + ' · ' : '') + ult.texto }) : null,
+      s.nota ? h('div', { class: 'ayuda chica agenda-notas', text: s.nota }) : null,
+      h('div', { class: 'botones-hon' },
+        h('button', { class: 'btn primario', type: 'button', onclick: function () { marcarSeg(s, 'REVISADO'); } }, 'Revisado'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { nuevoSeguido(s); } }, 'Editar'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { if (confirm('¿Quitar ' + (s.d || s.e) + ' de esta lista?')) marcarSeg(s, 'QUITAR'); } }, 'Quitar')));
+  }
+
+  function formSeguido() {
+    var f = seg.form, ls = Seguimientos.activas(datosSeg()), error = h('p', { class: 'error', hidden: true });
+    var campo = function (etiqueta, nodo) { return h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etiqueta }), nodo); };
+    var lista = h('select', { class: 'campo-form' }, ls.map(function (l) { return h('option', { value: l.id, text: l.nombre + ' (cada ' + l.dias + ' días)', selected: l.id === f.lista }); }));
+    if (!f.lista && ls[0]) f.lista = ls[0].id;
+    lista.addEventListener('change', function () { f.lista = lista.value; });
+    var revisar = h('input', { class: 'campo-form', type: 'date', value: f.revisar || '' });
+    revisar.addEventListener('input', function () { f.revisar = revisar.value; });
+    var nota = h('textarea', { class: 'campo-form', rows: '2', maxlength: '1000', placeholder: 'Ej.: esperar el informe del banco' }, f.nota || '');
+    nota.addEventListener('input', function () { f.nota = nota.value; });
+
+    // El juicio: se elige solo al agregar (para cambiarlo, se quita y se agrega otro).
+    var cajaJuicio = h('div', { class: 'form-hon-campos' });
+    var pintarJuicio = function () {
+      cajaJuicio.textContent = '';
+      if (f.e) {
+        cajaJuicio.appendChild(h('div', { class: 'agenda-juicio' }, h('span', { text: 'Expte. ' + f.e + (f.d ? ' · ' + f.d : '') }),
+          f.id ? null : h('button', { class: 'btn', type: 'button', onclick: function () { f.e = ''; f.d = ''; pintarJuicio(); } }, 'Cambiar')));
+        return;
+      }
+      var res = h('div', { class: 'man-lista' });
+      var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor', 'aria-label': 'Juicio' });
+      inp.addEventListener('input', function () {
+        res.textContent = '';
+        var t = inp.value.trim();
+        if (!t) return;
+        Buscador.buscar(estado.indice, t, 5).forEach(function (r) {
+          var x = estado.filas[r.i];
+          res.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () { f.e = x.e; f.d = x.d; pintarJuicio(); } },
+            h('b', { text: x.d }), h('span', { text: 'Expte. ' + x.e })));
+        });
+      });
+      cajaJuicio.appendChild(inp);
+      cajaJuicio.appendChild(res);
+    };
+    pintarJuicio();
+
+    var guardarBtn = h('button', { class: 'btn primario', type: 'submit' }, f.id ? 'Guardar cambios' : 'Agregar al seguimiento');
+    var form = h('form', { class: 'panel form-hon form-agenda' }, h('h2', { text: f.id ? 'Editar seguimiento' : 'Agregar un juicio' }),
+      campo('Juicio', cajaJuicio), campo('Lista', lista),
+      campo('Próxima revisión (optativo: si no, cuenta los días de la lista)', revisar),
+      campo('Nota (optativo)', nota), error,
+      h('div', { class: 'botones-hon' }, guardarBtn, h('button', { class: 'btn', type: 'button', onclick: function () { seg.form = null; pintarSeg(); } }, 'Cancelar')));
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var v = Seguimientos.validarSeguido(f);
+      if (!v.ok) { error.textContent = v.error; error.hidden = false; return; }
+      var fm = filaSeg(f.e) || {}, item = Object.assign({}, v.item, { id: f.id || idSeg() });
+      guardarBtn.disabled = true;
+      cambiarSeg({ a: 'segGuardar', item: item, nuevo: !f.id, creado: hoyInput(), estadoRev: fm.g || '', movRev: fm.ultMov || '' },
+                 (f.id ? 'Editar seguimiento: ' : 'Seguir: ') + (f.d || f.e)).then(function (ok) {
+        if (ok) { seg.grupo = item.lista; pintarSeg(); } else guardarBtn.disabled = false;
+      });
+    });
+    return form;
+  }
+
+  function formLista() {
+    var f = seg.form, error = h('p', { class: 'error', hidden: true });
+    var campo = function (etiqueta, nodo) { return h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etiqueta }), nodo); };
+    var nombre = h('input', { class: 'campo-form', value: f.nombre || '', maxlength: '60', placeholder: 'Ej.: Embargos en curso' });
+    nombre.addEventListener('input', function () { f.nombre = nombre.value; });
+    var dias = h('input', { class: 'campo-form', type: 'number', min: '1', max: '365', inputmode: 'numeric', value: String(f.dias || '') });
+    dias.addEventListener('input', function () { f.dias = Number(dias.value); });
+    var cuantos = f.id ? Seguimientos.activos(datosSeg()).filter(function (s) { return s.lista === f.id; }).length : 0;
+    var borrar = f.id ? h('button', { class: 'btn', type: 'button', onclick: function () {
+      if (!confirm('¿Borrar la lista "' + f.nombre + '"?' + (cuantos ? '\n\nSalen del seguimiento sus ' + cuantos + ' juicios (en la planilla quedan anotados).' : ''))) return;
+      cambiarSeg({ a: 'segListaBorrar', id: f.id }, 'Borrar lista: ' + f.nombre).then(function (ok) { if (ok) { seg.grupo = null; pintarSeg(); } });
+    } }, 'Borrar lista') : null;
+    var form = h('form', { class: 'panel form-hon form-agenda' }, h('h2', { text: f.id ? 'Editar lista' : 'Nueva lista' }),
+      campo('Nombre', nombre), campo('Revisar cada cuántos días', dias), error,
+      h('div', { class: 'botones-hon' }, h('button', { class: 'btn primario', type: 'submit' }, f.id ? 'Guardar' : 'Crear lista'),
+        h('button', { class: 'btn', type: 'button', onclick: function () { seg.form = null; pintarSeg(); } }, 'Cancelar'), borrar));
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var v = Seguimientos.validarLista(f);
+      if (!v.ok) { error.textContent = v.error; error.hidden = false; return; }
+      var id = f.id || idSeg();
+      cambiarSeg({ a: 'segLista', lista: Object.assign({ id: id }, v.lista), nuevo: !f.id, creado: hoyInput() }, (f.id ? 'Editar lista: ' : 'Nueva lista: ') + v.lista.nombre)
+        .then(function (ok) { if (ok) { seg.grupo = id; pintarSeg(); } });
+    });
+    return form;
+  }
+
+  function abrirListaSeg(id) {
+    seg.grupo = id;
+    seg.form = null;
+    pintarSeg();
+    window.scrollTo(0, 0);
+  }
+
+  function pintarSeg() {
+    var cont = $('seguimientos');
+    cont.textContent = '';
+    if (!estado.cfg) { cont.appendChild(h('p', { class: 'ayuda', text: 'Configurá la app primero (engranaje).' })); return; }
+    if (seg.error) cont.appendChild(h('div', { class: 'alerta', text: seg.error + (seg.datos && !/^Sin conexión/.test(seg.error) ? ' Lo que ves es la última copia guardada.' : '') }));
+    if (!seg.datos) { if (!seg.error) cont.appendChild(h('p', { class: 'ayuda', text: 'Cargando los seguimientos…' })); return; }
+
+    var hoy = hoyInput(), d = seg.datos, ls = Seguimientos.activas(d);
+    var abierta = seg.grupo ? Seguimientos.lista(d, seg.grupo) : null;
+    if (!abierta) seg.grupo = null;
+    var volver = function () { abrirListaSeg(null); };
+    if (abierta) cont.appendChild(cabeceraGrupo(abierta.nombre, volver));
+    if (seg.form) cont.appendChild(seg.form.tipo === 'lista' ? formLista() : formSeguido());
+    else cont.appendChild(h('div', { class: 'botones', style: 'margin-bottom:12px' },
+      ls.length ? h('button', { class: 'btn primario', type: 'button', onclick: function () { nuevoSeguido(); } }, '+ Agregar juicio') : null,
+      abierta ? h('button', { class: 'btn', type: 'button', onclick: function () { seg.form = Object.assign({ tipo: 'lista' }, abierta); pintarSeg(); } }, 'Editar lista')
+              : h('button', { class: 'btn', type: 'button', onclick: function () { seg.form = { tipo: 'lista', nombre: '', dias: 7 }; pintarSeg(); } }, '+ Nueva lista')));
+
+    if (!abierta) {
+      var tarjetas = h('div', { class: 'tarjetas-grupo cuatro' });
+      ls.forEach(function (l) {
+        var r = Seguimientos.resumenLista(d, l, filaSeg, hoy);
+        tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: l.nombre, entrar: true, grave: r.graves > 0, onclick: function () { abrirListaSeg(l.id); } }, r)));
+      });
+      cont.appendChild(tarjetas);
+      cont.appendChild(h('p', { class: 'ayuda chica', text: ls.length
+        ? 'Cada lista es una tarjeta. Avisa cuando toca revisar un juicio, cuando cambia su estado o cuando hay un movimiento nuevo en el MAESTRO desde la última revisión. Lo que toca revisar llega también por mail a la mañana. Para sumar un juicio también podés usar "Seguir" en su ficha.'
+        : 'No hay listas: creá una con "+ Nueva lista".' }));
+      return;
+    }
+    var xs = Seguimientos.deLista(d, abierta.id, filaSeg, hoy);
+    cont.appendChild(h('section', { class: 'seccion-agenda' }, xs.length ? xs.map(function (x) { return tarjetaSeguido(x, hoy); })
+      : h('p', { class: 'ayuda chica', text: 'Lista vacía. Agregá juicios con "+ Agregar juicio" o con el botón "Seguir" en la ficha de cada juicio.' })));
+    cont.appendChild(pieGrupo(volver));
+  }
+
   function pintarEscritos() {
     var cont = $('escritos');
     cont.textContent = '';
@@ -2745,6 +2973,9 @@
     agenda.datos = leer(LS.agenda);
     actualizarAlertasAgenda();
     cargarAgenda();
+    seg.datos = leer(LS.seg);
+    actualizarAlertasSeg();
+    cargarSeg();
     $('btn-presentados').addEventListener('click', marcarPresentados);
     $('btn-imprimir-lote').addEventListener('click', imprimirLote);
     $('doc-imprimir').addEventListener('click', function () { if (estado.doc) Impresion.documentoSae(estado.doc.titulo, estado.doc.texto, estado.doc.f); });
@@ -2764,8 +2995,8 @@
     q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') q.blur(); });
     $('btn-limpiar').addEventListener('click', function () { q.value = ''; render(); q.focus(); });
     $('estado-sync').addEventListener('click', function () { refrescar(true); });
-    document.addEventListener('visibilitychange', function () { if (!document.hidden) { refrescar(false); actualizarAlertasAgenda(); cargarAgenda(); } });
-    window.addEventListener('online', function () { enviarCola().then(function () { refrescar(true); cargarAgenda(); }); });
+    document.addEventListener('visibilitychange', function () { if (!document.hidden) { refrescar(false); actualizarAlertasAgenda(); cargarAgenda(); cargarSeg(); } });
+    window.addEventListener('online', function () { enviarCola().then(function () { refrescar(true); cargarAgenda(); cargarSeg(); }); });
     window.addEventListener('offline', function () { sync('Sin conexión · ' + haceCuanto(estado.generado), 'offline'); });
 
     render();

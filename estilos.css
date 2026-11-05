@@ -447,7 +447,11 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .form-agenda { border-top: 1px solid var(--borde); margin: 0 0 16px; padding-top: 12px; }
 .form-agenda h2 { font-size: 16px; margin: 0; }
 .agenda-contar summary { cursor: pointer; font-size: 14px; color: var(--azul); padding: 4px 0; }
+.chip-alerta { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: var(--e-naranja-bg); color: var(--e-naranja-tx); }
+.chip-alerta.grave { background: var(--rojo); color: #fff; }
+.seg-ultimo { font-size: 13px; color: var(--texto-2); margin-top: 4px; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .agenda-juicio { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
+.agenda-juicio .btn { flex-shrink: 0; white-space: nowrap; }
 @media (max-width: 480px) {
   .pestanas { gap: 4px; padding: 0 8px 2px; overflow-x: auto; scrollbar-width: none; }
   .pestanas::-webkit-scrollbar { display: none; }

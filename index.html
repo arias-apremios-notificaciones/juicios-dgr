@@ -38,6 +38,7 @@
   <nav class="pestanas" role="tablist">
     <button type="button" class="pestana activa" data-vista="buscar" role="tab">Buscar</button>
     <button type="button" class="pestana" data-vista="agenda" role="tab">Agenda <span id="cuenta-agenda" class="contador" hidden></span></button>
+    <button type="button" class="pestana" data-vista="seguimientos" role="tab">Seguimientos <span id="cuenta-seg" class="contador" hidden></span></button>
     <button type="button" class="pestana" data-vista="firmar" role="tab">Para firmar <span id="cuenta-firmar" class="contador" hidden></span></button>
     <button type="button" class="pestana" data-vista="escritos" role="tab">Escritos</button>
     <button type="button" class="pestana" data-vista="honorarios" role="tab">Honorarios</button>
@@ -66,6 +67,7 @@
   <main id="escritos" hidden></main>
   <main id="honorarios" hidden></main>
   <main id="agenda" hidden></main>
+  <main id="seguimientos" hidden></main>
   <main id="tablero" hidden></main>
   <div id="barra-acciones" class="barra-acciones" hidden>
     <span id="acciones-texto"></span>
@@ -126,6 +128,7 @@
   <script src="buscar.js"></script>
   <script src="imprimir.js"></script>
   <script src="agenda.js"></script>
+  <script src="seguimientos.js"></script>
   <script src="tablero.js"></script>
   <script src="modelos.js"></script>
   <script src="app.js"></script>
