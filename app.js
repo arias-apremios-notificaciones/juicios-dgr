@@ -2716,7 +2716,11 @@
     }
     if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
     if (!manual.tipo) { caja.appendChild(h('p', { class: 'ayuda', text: 'Elegí arriba el modelo de escrito.' })); return; }
-    if (!manual.previa) { caja.appendChild(h('div', { class: 'cargando-txt', text: manual.tipo === 'COMUNICO_IVP' ? 'Buscando el IVP en Gmail y consultando el SAE…' : 'Consultando el SAE…' })); return; }
+    if (!manual.previa) {
+      var buscando = manual.tipo === 'COMUNICO_IVP' ? 'Buscando el IVP en Gmail y consultando el SAE…'
+                   : esModelo(manual.tipo) && Modelos.MODELOS[manual.tipo].prueba ? 'Consultando el SAE y buscando la prueba en la contestación de excepciones…' : 'Consultando el SAE…';
+      caja.appendChild(h('div', { class: 'cargando-txt', text: buscando })); return;
+    }
 
     var p = manual.previa;
     if (!p.ok) { caja.appendChild(h('p', { class: 'error', text: p.error })); return; }
@@ -2781,6 +2785,13 @@
     if (p.sae.caratula) tarjeta.appendChild(h('div', { class: 'ayuda chica', text: p.sae.caratula }));
     if (!p.sae.encontrado) caja.appendChild(h('div', { class: 'alerta', text: 'El expediente no se encontró en el SAE: el encabezado sale de la nominación del MAESTRO (OGA N° 1). Revisalo en el PDF.' }));
     if (p.pendiente) caja.appendChild(h('div', { class: 'alerta', text: 'Ya hay un escrito de este expediente esperando firma (pestaña Para firmar).' }));
+    // OFREZCO PRUEBA: de dónde salió el texto (Drive o SAE), o aviso de que quedó el habitual.
+    if (p.prueba) caja.appendChild(p.prueba.parrafos.length
+      ? h('div', { class: 'panel caja-ok' }, h('b', { text: 'Prueba copiada de la contestación de excepciones' }),
+          h('div', { class: 'ayuda chica' }, p.prueba.url ? h('a', { href: p.prueba.url, target: '_blank', rel: 'noopener', text: p.prueba.fuente + ' ↗' }) : p.prueba.fuente),
+          h('div', { class: 'ayuda chica', text: 'Revisala antes de generar. "Texto habitual" vuelve al modelo.' }))
+      : h('div', { class: 'alerta', text: 'No encontré la prueba ofrecida en la contestación de excepciones (ni en el Drive ni en el SAE)' +
+          (p.prueba.error ? ' — ' + p.prueba.error : '') + '. Quedó el texto habitual: revisalo y completalo.' }));
 
     var titulo = h('textarea', { id: 'mod-titulo', class: 'campo-form', rows: '2' });   // en el teléfono el título largo no entra en un renglón
     titulo.value = ed.titulo;

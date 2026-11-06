@@ -25,6 +25,19 @@ var Modelos = (function () {
     'II.- Encontrándose cancelada la deuda en ejecución, solicito el levantamiento de embargo dispuesto en autos y, en caso de que la entidad bancaria haya retenido fondos, solicito la devolución de fondos a la cuenta origen de la demandada.',
     'A tales efectos, presto la conformidad establecida en el artículo 35 de la Ley 5480. Se tenga presente.'];
   var INFORME_BANCARIO = 'Asimismo, acompaño informe bancario emitido por el Colegio de Abogados de Tucumán. Se agregue y se tenga presente.';
+  // OFREZCO PRUEBA (cuadernos de prueba de las excepciones): CUENCA DULCE (A1, documental) y MONTE CASSINO (A2, informativa).
+  // El texto de la prueba se copia de la sección PRUEBAS de la contestación de excepciones (Drive o SAE); si no está, va el habitual.
+  var PRESENTACION_PRUEBA = ', de las condiciones personales que constan en autos, a V.S. respetuosamente me presento y digo:';
+  var DOCUMENTAL_HABITUAL = 'Las constancias de autos, en especial el escrito de demanda, las boletas de deuda -cargos tributarios- que sirven de base a la presente acción y el escrito de contestación de Excepciones.';
+  var INFORMATIVA_HABITUAL = 'Solicito se libre oficio a la División Control de Cobros Judiciales de la DGR, a los fines de que por su intermedio remita copia digitalizada del expediente Nº {EXPEDIENTE ADMINISTRATIVO}.';
+  var CUADERNOS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
+  function cuerpoPrueba(clase, parrafos) {
+    var documental = clase === 'DOCUMENTAL';
+    return ['I.- Ofrezco prueba ' + (documental ? 'documental' : 'informativa') + ':'].concat(parrafos,
+      ['II.- Petitorio:', 'Por lo expuesto, a V.S. pido:',
+       documental ? 'Se tenga por ofrecida en tiempo y forma la prueba y se forme el presente cuaderno.-'
+                  : 'Se tenga por ofrecida en tiempo y forma la prueba, se forme el presente cuaderno y se libre oficio.-']);
+  }
   // Desplegable del embargo: los bancos que más aparecen en los oficios del SAE y los habituales en Tucumán ("Otro" se escribe a mano).
   var BANCOS = ['BANCO BBVA ARGENTINA S.A.', 'BANCO COMAFI S.A.', 'BANCO CREDICOOP COOPERATIVO LTDO.', 'BANCO DE GALICIA Y BUENOS AIRES S.A.U.',
                 'BANCO DE LA NACION ARGENTINA', 'BANCO DEL TUCUMAN S.A.', 'BANCO HIPOTECARIO S.A.', 'BANCO HSBC ARGENTINA S.A.', 'BANCO ICBC ARGENTINA S.A.U.',
@@ -396,6 +409,26 @@ var Modelos = (function () {
       presentacion: ', apoderado de la parte actora a V.S. respetuosamente digo:',
       cuerpo: ['Atento a lo informado por el oficial de justicia actuante, en cuanto a que en el domicilio del demandado no existe numeración a la vista, motivo por el cual se devolvió la manda judicial sin diligenciar, solicito se libre oficio a la Dirección General de Catastro, a fin de que indique la numeración de los inmuebles colindantes al del demandado sito en {DOMICILIO}, sus medidas, características y cualquier otro dato que permita su correcta individualización, a los fines de practicar una nueva diligencia.'],
       campos: [{ id: 'DOMICILIO', etiqueta: 'Domicilio del demandado (ej. Almirante Brown 78 - Lules)', tipo: 'texto' }]
+    },
+    // ── 06/11/2026 (sin sellar): cuadernos de prueba de las excepciones ──
+    // "CUENCA DULCE SRL (3624-26-A1) - OFREZCO PRUEBA DOCUMENTAL A1"
+    PRUEBA_DOCUMENTAL: {
+      nombre: 'OFREZCO PRUEBA DOCUMENTAL', claves: 'prueba documental instrumental cuaderno excepciones apertura a prueba ofrezco ofrecimiento',
+      titulo: 'OFREZCO PRUEBA DOCUMENTAL',
+      presentacion: PRESENTACION_PRUEBA,
+      prueba: 'DOCUMENTAL',
+      cuerpo: cuerpoPrueba('DOCUMENTAL', [DOCUMENTAL_HABITUAL]),
+      campos: [{ id: 'CUADERNO', etiqueta: 'Cuaderno de prueba (se agrega al Nº del expediente: …/26-A1)', tipo: 'opciones', opciones: CUADERNOS, defecto: 'A1' }]
+    },
+    // "MONTE CASSINO SRL (5590-23) II - OFREZCO PRUEBA INFORMATIVA A2"
+    PRUEBA_INFORMATIVA: {
+      nombre: 'OFREZCO PRUEBA INFORMATIVA', claves: 'prueba informativa informes oficio cuaderno excepciones expediente administrativo cobros judiciales ofrezco ofrecimiento',
+      titulo: 'OFREZCO PRUEBA INFORMATIVA',
+      presentacion: PRESENTACION_PRUEBA,
+      prueba: 'INFORMATIVA',
+      cuerpo: cuerpoPrueba('INFORMATIVA', [INFORMATIVA_HABITUAL]),
+      campos: [{ id: 'CUADERNO', etiqueta: 'Cuaderno de prueba (se agrega al Nº del expediente: …/23-A2)', tipo: 'opciones', opciones: CUADERNOS, defecto: 'A2' },
+               { id: 'EXPEDIENTE ADMINISTRATIVO', etiqueta: 'Expediente administrativo (ej. 6564/376-D-2022)', tipo: 'texto' }]
     }
   };
 
@@ -465,12 +498,13 @@ var Modelos = (function () {
     Object.keys(AGREGADOS).forEach(function (k) { ag[k] = AGREGADOS[k]; });
     return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null, requisitos: (m.requisitos || []).slice(),
              variantes: (m.variantes || []).map(function (v) { return { nombre: v.nombre, cuerpo: v.cuerpo.slice() }; }),
-             campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', opciones: (c.opciones || []).slice() }; }), agregados: ag };
+             campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', defecto: c.defecto || '', opciones: (c.opciones || []).slice() }; }),
+             prueba: m.prueba || '', agregados: ag };
   }
 
   /** Valor automático de un campo (auto = { demandado, cuit, importe, hoy } del juicio). */
   function valorAuto(c, auto) {
-    if (!c.auto || !auto) return '';
+    if (!c.auto || !auto) return c.defecto || '';
     if (c.auto === 'cuit') return String(auto.cuit || '').replace(/\D/g, '');
     if (c.auto === 'importe') return Number(auto.importe) > 0 ? pesos(auto.importe).slice(1) : '';   // IMPORTE del MAESTRO: "603.301,60"
     return String(auto[c.auto] || '');
@@ -546,6 +580,12 @@ var Modelos = (function () {
     var resto = (titulo + ' ' + cuerpo.join(' ')).match(LLAVE);
     if (resto) return { ok: false, error: 'Hay un dato entre llaves que no se completa: ' + resto[0] + '. Borralo o corregilo.' };
 
+    // Cuaderno de prueba: va pegado al Nº del expediente (3624/26-A1) y en el nombre del archivo.
+    var cuaderno = '';
+    if (m.prueba) {
+      cuaderno = limpio((ed.campos || {}).CUADERNO || 'A1').toUpperCase();
+      if (!/^[A-Z]\d{1,2}$/.test(cuaderno)) return { ok: false, error: 'El cuaderno de prueba va como A1, A2…' };
+    }
     var subidos = (ed.archivos || []).length;
     if (m.adjunto && !m.adjunto.opcional && !subidos) return { ok: false, error: 'Falta subir el archivo: ' + m.adjunto.etiqueta.toLowerCase() + '.' };
     if (subidos > MAX_ARCHIVOS) return { ok: false, error: 'Son muchos archivos (máximo ' + MAX_ARCHIVOS + ').' };
@@ -554,9 +594,51 @@ var Modelos = (function () {
     var seguimiento = m.seguimiento && tituloModelo ? rellenar(m.seguimiento, c.valores) : sinPunto + '.';
     if (/\{[^{}]+\}/.test(seguimiento)) seguimiento = sinPunto + '.';   // un dato del seguimiento quedó afuera del texto
     return {
-      ok: true, titulo: titulo, accion: sinPunto, tipo: sinPunto, presentacion: m.presentacion, cierre: !!m.cierre, cuerpo: cuerpo,
-      seguimiento: seguimiento, sinArca: !(ed.arca == null ? !!m.arca : ed.arca), carpeta: CARPETA, adjunto: m.adjunto || null
+      ok: true, titulo: titulo, accion: sinPunto + (cuaderno ? ' ' + cuaderno : ''), tipo: sinPunto, presentacion: m.presentacion, cierre: !!m.cierre, cuerpo: cuerpo,
+      cuaderno: cuaderno, seguimiento: cuaderno ? seguimiento.replace(/\.$/, ' (CUADERNO ' + cuaderno + ').') : seguimiento, sinArca: !(ed.arca == null ? !!m.arca : ed.arca), carpeta: CARPETA, adjunto: m.adjunto || null
     };
+  }
+
+  /**
+   * Prueba ofrecida en la contestación de excepciones (texto del Word, del PDF o del SAE).
+   * Toma la sección PRUEBAS / OFREZCO PRUEBA hasta la reserva del caso federal o el petitorio, y la reparte en
+   * DOCUMENTAL (también "INSTRUMENTAL") e INFORMATIVA (también "INFORMES"). Devuelve los párrafos de cada una.
+   */
+  var INICIO_PRUEBA = /^\s*(?:[IVX]+\s*[.\-)]+\s*|\d+\s*[.\-)]+\s*)?(?:PRUEBAS?|OFREZCO (?:LA SIGUIENTE )?PRUEBAS?|OFRECIMIENTO DE PRUEBAS?|OFRECE PRUEBAS?)\s*:?\s*$/i;
+  var FIN_PRUEBA = /^\s*(?:[IVX]+\s*[.\-)]+\s*|\d+\s*[.\-)]+\s*)?(?:PLANTEO RESERVA|RESERVA DEL CASO FEDERAL|RESERVA|PETITORIO|PETITUM|DERECHO|AUTORIZA)/i;
+  var CLASE_PRUEBA = /^\s*(?:[a-z0-9]{1,3}\s*[.\-)]+\s*|[•\-]\s*)?(INSTRUMENTAL|DOCUMENTAL|INFORMATIVA|INFORMES?|PERICIAL(?: CONTABLE)?|CONFESIONAL|TESTIMONIAL)\b\s*:?\s*(.*)$/i;
+  function pruebaOfrecida(texto) {
+    var lineas = String(texto || '').replace(/\r/g, '').split('\n');
+    var desde = -1;
+    for (var i = lineas.length - 1; i >= 0; i--) if (INICIO_PRUEBA.test(lineas[i])) { desde = i; break; }   // la última: no la cita de la contraria
+    var r = { DOCUMENTAL: [], INFORMATIVA: [], encontrada: desde >= 0 };
+    if (desde < 0) return r;
+    var seccion = [];
+    for (var j = desde + 1; j < lineas.length && !FIN_PRUEBA.test(lineas[j]); j++) seccion.push(lineas[j]);
+    // Word: un párrafo por renglón. PDF: los renglones se cortan y los párrafos se separan con un renglón en blanco.
+    var conBlancos = /\n\s*\n/.test(seccion.join('\n').trim());
+    var bloques = [], actual = [];
+    seccion.forEach(function (l) {
+      var t = l.trim();
+      var corta = !t || CLASE_PRUEBA.test(t) || /^[•\-]\s/.test(t) || /^[a-z0-9]{1,2}\)\s/i.test(t) || !conBlancos;
+      if (corta && actual.length) { bloques.push(actual.join(' ')); actual = []; }
+      if (t) actual.push(t);
+    });
+    if (actual.length) bloques.push(actual.join(' '));
+    var clase = null;
+    bloques.forEach(function (b) {
+      b = limpio(b);
+      if (/^ofrezco (la siguiente|las siguientes)\s*:?\s*$/i.test(b) || /^(la siguiente|las siguientes)\s*:?$/i.test(b)) return;
+      var m = b.match(CLASE_PRUEBA);
+      if (m) {
+        var k = m[1].toUpperCase();
+        clase = /INSTRUMENTAL|DOCUMENTAL/.test(k) ? 'DOCUMENTAL' : /INFORM/.test(k) ? 'INFORMATIVA' : null;
+        b = limpio(m[2]);
+        if (!b) return;
+      }
+      if (clase) r[clase].push(b.replace(/^[•\-]\s*/, ''));
+    });
+    return r;
   }
 
   /**
@@ -573,6 +655,7 @@ var Modelos = (function () {
 
   return { MODELOS: MODELOS, AGREGADOS: AGREGADOS, CARPETA: CARPETA, CARPETA_ADJUNTOS: CARPETA_ADJUNTOS,
            lista: lista, buscar: buscar, paraApp: paraApp, valorAuto: valorAuto, encabezado: encabezado, armar: armar,
+           pruebaOfrecida: pruebaOfrecida, cuerpoPrueba: cuerpoPrueba,
            pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto };
 })();
 
