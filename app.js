@@ -170,11 +170,19 @@
       contenido.appendChild(h('div', { class: 'vacio' },
         h('h2', { text: 'Sin resultados' }),
         h('p', { text: 'Probá con otra parte del nombre, el número sin el año o el CUIT.' })));
+      contenido.appendChild(lineaBuscarHon(texto));
       return;
     }
     contenido.appendChild(h('p', { class: 'resumen' }, res.length === 1 ? '1 juicio' : res.length + (res.length === 60 ? '+' : '') + ' juicios',
       res.length > 1 ? h('a', { href: '#', class: 'imp-link', onclick: function (ev) { ev.preventDefault(); Impresion.listado('Búsqueda "' + texto + '"', res.map(function (r) { return estado.filas[r.i]; })); }, text: 'Imprimir lista' }) : null));
     res.forEach(function (r) { contenido.appendChild(tarjeta(estado.filas[r.i], res.length === 1)); });
+    contenido.appendChild(lineaBuscarHon(texto));
+  }
+
+  /** Al pie de la búsqueda: la misma búsqueda en la pestaña Honorarios. */
+  function lineaBuscarHon(texto) {
+    return h('div', { class: 'botones', style: 'margin:10px 0' },
+      h('button', { class: 'btn', type: 'button', onclick: function () { abrirEnHonorarios(texto); } }, '$ Buscar «' + texto + '» en Honorarios'));
   }
 
   function pintarInicio() {
@@ -258,7 +266,10 @@
     });
     det.appendChild(h('div', { class: 'botones', style: 'margin:4px 0 8px' }, btnImp,
       h('button', { class: 'btn', type: 'button', onclick: function () { nuevoAgenda({ e: f.e, d: f.d }); } }, 'Agendar'),
-      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoSeguido({ e: f.e, d: f.d }); } }, 'Seguir')));
+      h('button', { class: 'btn', type: 'button', onclick: function () { nuevoSeguido({ e: f.e, d: f.d }); } }, 'Seguir'),
+      h('button', { class: 'btn', type: 'button', onclick: function () { abrirEnHonorarios(f.e); } }, 'Abrir en Honorarios')));
+    var enHon = hon.datos && hon.pin ? filasEnHon(hon.datos, f.e) : [];
+    if (enHon.length) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:-4px 0 8px', text: '$ En HONORARIOS: fila ' + enHon.join(', ') }));
     var listasDe = seg.datos ? Seguimientos.activos(seg.datos).filter(function (s) { return s.e === f.e; })
       .map(function (s) { return (Seguimientos.lista(seg.datos, s.lista) || {}).nombre; }).filter(Boolean) : [];
     if (listasDe.length) det.appendChild(h('div', { class: 'ayuda chica', style: 'margin:-4px 0 8px', text: '👁 En seguimiento: ' + listasDe.join(' · ') }));
@@ -1048,7 +1059,7 @@
   var HON_INACTIVO_MS = 10 * 60 * 1000, HON_FUERA_MS = 2 * 60 * 1000;
 
   function bloquearHon(msg) {
-    hon.pin = null; hon.datos = null; hon.msgPin = msg || '';
+    hon.pin = null; hon.datos = null; hon.msgPin = msg || ''; hon.buscar = ''; hon.indice = null;
     actualizarBtnHon();
     if (estado.vista === 'honorarios') pintarPin();
   }
@@ -1206,6 +1217,9 @@
       return;
     }
 
+    var buscador = buscadorHon(d);   // arriba de todo: se ve sin desplazar
+    cont.appendChild(buscador.caja);
+
     // Resumen + SAE
     var p = d.pendientes;
     var infoSae = d.sae.enCurso ? 'Consultando el SAE…' + (d.sae.quedan ? ' quedan ' + d.sae.quedan : '')
@@ -1249,6 +1263,78 @@
       tarjetas.appendChild(tarjetaGrupo(Object.assign({ nombre: nombres[id], abierta: false, entrar: true, onclick: function () { abrirGrupoHon(id); } }, datosTarjeta[id])));
     });
     cont.appendChild(tarjetas);
+    buscador.tapar(tarjetas);
+  }
+
+  // ───────── Buscador de HONORARIOS (pedido de Carlos, 06/11/2026): el mismo de la pestaña Buscar, sobre las filas de la planilla ─────────
+  /** Todas las filas conocidas: pendientes, cobradas (semana y mes) y, del resto de la planilla, solo el Nº de fila (el nombre sale del MAESTRO). */
+  function filasHon(d) {
+    if (hon.indice && hon.indice.datos === d) return hon.indice;
+    var porFila = {}, items = [];
+    var sumar = function (x) { if (x && x.r && !porFila[x.r]) { porFila[x.r] = x; items.push(x); } };
+    (d.pendientes.activos || []).concat(d.pendientes.dormidos || []).forEach(sumar);
+    ((d.listado && d.listado.cobrados) || []).concat((d.mes && d.mes.registrados) || []).forEach(sumar);
+    var porClave = {};
+    estado.filas.forEach(function (f) { var k = Buscador.exptesDe(f.e)[0]; if (k && !porClave[k]) porClave[k] = f; });
+    Object.keys(d.enPlanilla || {}).forEach(function (k) {
+      var fm = porClave[k];
+      d.enPlanilla[k].forEach(function (r) { sumar({ r: r, e: fm ? fm.e : k, d: fm ? fm.d : '', soloFila: true }); });
+    });
+    var cuits = function (x) { var fm = porClave[Buscador.exptesDe(x.e)[0]]; return fm ? fm.c : ''; };
+    hon.indice = { datos: d, items: items, indice: Buscador.indexar(items.map(function (x) { return { d: x.d, e: x.e, c: cuits(x) }; })) };
+    return hon.indice;
+  }
+
+  function buscarHon(d, texto) {
+    var ix = filasHon(d);
+    return Buscador.buscar(ix.indice, texto, 30).map(function (r) { return ix.items[r.i]; });
+  }
+
+  /** Casilla de búsqueda arriba de las tarjetas: mientras hay texto, se ven los resultados en lugar de las tarjetas. */
+  function buscadorHon(d) {
+    var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', enterkeyhint: 'search',
+                           value: hon.buscar || '', placeholder: 'Buscar en HONORARIOS: expediente, deudor o CUIT', 'aria-label': 'Buscar en HONORARIOS' });
+    var res = h('div', { 'aria-live': 'polite' }), tapadas = null;
+    var pintar = function () {
+      var t = inp.value.trim();
+      hon.buscar = t;
+      res.textContent = '';
+      if (tapadas) tapadas.hidden = !!t;
+      if (!t) return;
+      var lista = buscarHon(d, t);
+      res.appendChild(h('p', { class: 'resumen', text: lista.length ? (lista.length === 1 ? '1 fila en HONORARIOS' : lista.length + (lista.length === 30 ? '+' : '') + ' filas en HONORARIOS') : 'No está en HONORARIOS' }));
+      if (!lista.length) {
+        var fm = estado.filas.filter(function (f) { return Buscador.exptesDe(t)[0] && Buscador.exptesDe(f.e)[0] === Buscador.exptesDe(t)[0]; })[0];
+        res.appendChild(h('div', { class: 'botones-hon' },
+          fm ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(fm.e); } }, 'Ver juicio') : null,
+          h('button', { class: 'btn', type: 'button', onclick: function () { hon.buscar = ''; abrirGrupoHon('alta'); } }, 'Agregar un juicio a HONORARIOS')));
+      }
+      lista.forEach(function (x) { res.appendChild(x.soloFila ? tarjetaSoloFila(x) : conVerJuicio(tarjetaHon(x), x)); });
+    };
+    inp.addEventListener('input', function () { usoHon(); pintar(); });
+    return {
+      caja: h('div', { class: 'panel' }, inp, res),
+      tapar: function (el) { tapadas = el; pintar(); }
+    };
+  }
+
+  function conVerJuicio(card, x) {
+    if (enMaestro(x.e)) card.lastChild.appendChild(h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio'));
+    return card;
+  }
+
+  /** Fila de la planilla sin saldo pendiente (cobrada antes o sin monto): solo el enlace a la fila. */
+  function tarjetaSoloFila(x) {
+    return conVerJuicio(h('div', { class: 'item-rev' }, h('b', { text: x.d || 'Expte. ' + x.e }),
+      h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · fila ' + x.r + ' de HONORARIOS' }),
+      h('div', { class: 'motivo tranquilo', text: 'Sin saldo pendiente en la planilla (cobrado o sin monto cargado).' }),
+      h('div', { class: 'botones-hon' }, linkHon(x.r))), x);
+  }
+
+  /** Desde la pestaña Buscar: abre Honorarios con la búsqueda hecha (si está bloqueada, primero pide el PIN). */
+  function abrirEnHonorarios(texto) {
+    hon.buscar = texto; hon.grupo = null;
+    cambiarVista('honorarios');
   }
 
   function abrirGrupoHon(id) { hon.grupo = id; pintarHonorarios(); window.scrollTo(0, 0); }
@@ -2364,14 +2450,14 @@
   // Listas propias de juicios para seguir de cerca: cada lista es una tarjeta. Funciona sin conexión igual que la Agenda.
   var seg = { datos: null, error: '', grupo: null, form: null, filas: null, mapa: {} };   // grupo: lista abierta (null = las tarjetas)
 
-  function filaMaestro(e) {
+  function filaDeExpte(e) {   // (antes se llamaba filaMaestro y tapaba la de Honorarios)
     if (seg.filas !== estado.filas) { seg.filas = estado.filas; seg.mapa = {}; estado.filas.forEach(function (f) { seg.mapa[f.e] = f; }); }
     return seg.mapa[e] || null;
   }
   /** Estado y último movimiento del MAESTRO (sin los datos del MAESTRO todavía cargados no se avisa nada). */
   function filaSeg(e) {
     if (!estado.filas.length) return {};
-    var f = filaMaestro(e);
+    var f = filaDeExpte(e);
     return f ? { g: f.g || '', ultMov: ultimoMovIso(f) } : null;
   }
   function datosSeg() { return seg.datos || { listas: [], seguidos: [] }; }
@@ -2432,7 +2518,7 @@
   }
 
   function tarjetaSeguido(x, hoy) {
-    var s = x.s, f = estado.filas.length ? filaMaestro(s.e) : null, ult = f ? Buscador.ultimaLinea(f.f) : null;
+    var s = x.s, f = estado.filas.length ? filaDeExpte(s.e) : null, ult = f ? Buscador.ultimaLinea(f.f) : null;
     var toca = x.alertas.some(function (a) { return a.tipo === 'REVISAR'; });   // el atraso ya se lee en la línea de la revisión
     return h('div', { class: 'item-agenda nivel-' + (toca ? 'vencido' : x.alertas.length ? 'cerca' : 'normal') },
       h('div', { class: 'agenda-chips' },
