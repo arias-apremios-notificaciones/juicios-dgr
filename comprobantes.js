@@ -159,19 +159,39 @@ var Comprobantes = (function () {
     return { ok: false, error: 'Tipo de comprobante desconocido: ' + tipo };
   }
 
+  // Texto para la descripción de la factura (Carlos, 06/11/2026). Las variables [***] salen del juicio y se pueden corregir en la app.
+  var FACTURA_TEXTO = 'CANCELACION DE HONORARIOS PROFESIONALES CORRESPONDIENTES A JUICIO DE EJECUCION FISCAL CARATULADO: “PROVINCIA DE TUCUMAN –DGR- vs. {DEMANDADO}”, ' +
+                      'TRAMITADO ANTE EL JUZGADO DE COBROS Y APREMIOS DE LA {NOMINACION} NOMINACION DEL CENTRO JUDICIAL {CENTRO} POR EXPEDIENTE N° {EXPEDIENTE}.';
+
+  /** Nom de HONORARIOS → { nominacion: 'I°' | 'II°' | '', centro: 'CAPITAL' | 'CONCEPCION' }. */
+  function partesNominacion(nom) {
+    var s = String(nom || '').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    var r = s.replace(/CONC[A-Z]*\.?/g, '').replace(/[^I]/g, '');
+    return { nominacion: r === 'I' || r === 'II' ? r + '°' : '', centro: /CONC/.test(s) ? 'CONCEPCION' : 'CAPITAL' };
+  }
+
+  /** v: { demandado, nominacion, centro, exptes }. Lo que falta queda como [***] para completarlo a mano. */
+  function textoFactura(v) {
+    var dato = function (x) { x = String(x || '').replace(/\s+/g, ' ').trim().toUpperCase(); return x || '[***]'; };
+    var ex = listaExptes(v.exptes);
+    return FACTURA_TEXTO.replace('{DEMANDADO}', dato(v.demandado)).replace('{NOMINACION}', dato(v.nominacion)).replace('{CENTRO}', dato(v.centro))
+      .replace('{EXPEDIENTE}', ex.length ? ex.join(' Y ') : dato(v.exptes));
+  }
+
   /** Lo que se copia en ARCA (Comprobantes en línea → Factura C, monotributo). */
   function datosFactura(d) {
-    var exptes = listaExptes(d.exptes), hon = monto(d.honorarios), apo = monto(d.aportes);
+    var hon = monto(d.honorarios), apo = monto(d.aportes), pn = partesNominacion(d.nom);
+    var variables = { demandado: String(d.demandado || '').toUpperCase().trim(), nominacion: pn.nominacion, centro: pn.centro, exptes: listaExptes(d.exptes).join('; ') };
     return {
       receptor: String(d.pagador || d.demandado || '').toUpperCase().trim(),
       documento: String(d.documento || ''),
-      descripcion: 'Honorarios profesionales - ' + (exptes.length > 1 ? 'Exptes. ' : 'Expte. ') + unirY(exptes) +
-                   ' - PROVINCIA DE TUCUMAN -D.G.R.- c/ ' + String(d.demandado || '').toUpperCase().trim() + ' s/ EJECUCION FISCAL',
+      variables: variables,
+      descripcion: textoFactura(variables),
       importe: hon ? pesos(hon + (apo || 0)).replace('$', '') : ''
     };
   }
 
-  return { ARCA: ARCA, armar: armar, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
+  return { ARCA: ARCA, armar: armar, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, textoFactura: textoFactura, partesNominacion: partesNominacion, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Comprobantes;

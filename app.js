@@ -1921,9 +1921,31 @@
     };
     var area = h('div');
     var subir = function () { area.textContent = ''; var t = h('div'); accion(t, 'subir', x, hon.datos); area.appendChild(t); var sel = t.querySelector('select'); if (sel) sel.value = 'FACTURA'; };
+    // Texto de la descripción: las variables vienen del juicio y se corrigen acá (cada factura arranca de nuevo del modelo).
+    var v = fd.variables;
+    var campoV = function (etq, valor, attrs) { var i = h('input', Object.assign({ class: 'campo-form', 'aria-label': etq, value: valor || '', placeholder: '[***]' }, attrs || {})); return { i: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etq }), i) }; };
+    var vd = campoV('Demandado', v.demandado), ve = campoV('Expediente (varios: 19633/24; 7133/25)', v.exptes);
+    var vn = h('select', { class: 'campo-form', 'aria-label': 'Nominación' }, [['I°', 'I°'], ['II°', 'II°'], ['', '[***]']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+    var vc = h('select', { class: 'campo-form', 'aria-label': 'Centro judicial' }, ['CAPITAL', 'CONCEPCION'].map(function (o) { return h('option', { value: o, text: o }); }));
+    vn.value = v.nominacion; vc.value = v.centro;
+    var texto = h('div', { class: 'texto-factura', 'aria-live': 'polite' });
+    var armarTexto = function () { return Comprobantes.textoFactura({ demandado: vd.i.value, nominacion: vn.value, centro: vc.value, exptes: ve.i.value }); };
+    var pintar = function () { texto.textContent = armarTexto(); };
+    [vd.i, ve.i, vn, vc].forEach(function (el) { el.addEventListener('input', pintar); el.addEventListener('change', pintar); });
+    pintar();
+    var bloqueTexto = h('div', { class: 'campo-rh' },
+      h('label', { class: 'etiqueta', text: 'Texto para la descripción de la factura' }),
+      vd.nodo, h('div', { style: 'display:flex;gap:8px' }, h('div', { class: 'campo-rh', style: 'flex:1' }, h('label', { class: 'etiqueta', text: 'Nominación' }), vn),
+                                                       h('div', { class: 'campo-rh', style: 'flex:1' }, h('label', { class: 'etiqueta', text: 'Centro judicial' }), vc)), ve.nodo,
+      texto,
+      h('div', { class: 'botones-hon' }, h('button', { class: 'btn primario', type: 'button', onclick: function () {
+        var t = armarTexto();
+        if (/\[\*\*\*\]/.test(t) && !confirm('Al texto le falta completar [***]. ¿Copiarlo igual?')) return;
+        copiar(t, 'Texto de la factura copiado');
+      } }, 'Copiar el texto')));
     return h('div', { class: 'form-hon' },
       h('div', { class: 'ayuda chica', text: '1) Entrá a ARCA con tu clave fiscal → "Comprobantes en línea" → Factura C (Concepto: Servicios). 2) Copiá estos datos. 3) Bajá el PDF y subilo acá: queda en FACTURAS ' + new Date().getFullYear() + ' y enlazado en HONORARIOS.' }),
-      fila('Receptor', fd.receptor), fila('CUIT / DNI', fd.documento), fila('Descripción', fd.descripcion), fila('Importe', fd.importe),
+      fila('Receptor', fd.receptor), fila('CUIT / DNI', fd.documento), bloqueTexto, fila('Importe', fd.importe),
       h('div', { class: 'botones-hon' },
         h('a', { class: 'btn primario', href: Comprobantes.ARCA, target: '_blank', rel: 'noopener' }, 'Abrir ARCA ↗'),
         h('button', { class: 'btn', type: 'button', onclick: subir }, 'Ya la emití: subir el PDF')),

@@ -544,3 +544,4 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .dato-factura { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,.08); }
 .dato-factura .etiqueta { grid-column: 1 / -1; }
 .dato-factura b { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.texto-factura { background: var(--superficie-2, rgba(0,0,0,.04)); border: 1px solid var(--borde); border-radius: 8px; padding: 10px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; margin-top: 6px; }
