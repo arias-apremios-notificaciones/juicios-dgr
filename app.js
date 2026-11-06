@@ -1708,8 +1708,8 @@
         var cuentas = function () {
           var n = numeroAr(hon_.input.value);
           if (!n) { resumen.textContent = ''; return; }
-          var iva = Math.round(n * 21) / 100, ap = Math.round(n * 10) / 100;
-          resumen.textContent = 'IVA 21 %: $ ' + montoATexto(iva) + ' · Aportes 10 %: $ ' + montoATexto(ap) + ' · Total: $ ' + montoATexto(n + iva + ap);
+          var ap = Math.round(n * 10) / 100;   // sin IVA: Monotributista desde el 03/11/2026
+          resumen.textContent = 'Aportes 10 %: $ ' + montoATexto(ap) + ' · Total: $ ' + montoATexto(n + ap);
         };
         hon_.input.addEventListener('input', cuentas);
         campos.appendChild(hon_.nodo);
@@ -2756,7 +2756,7 @@
     var m = p.modelo;
     var campos = m.campos || [];
     if (!manual.ed) {
-      var auto = { demandado: f.d, cuit: f.c, hoy: isoADmy(hoyInput()) }, iniciales = {};
+      var auto = { demandado: f.d, cuit: f.c, importe: f.i, hoy: isoADmy(hoyInput()) }, iniciales = {};
       campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
       manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales, requisitos: [] };
     }
@@ -2765,7 +2765,7 @@
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
       return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos,
-                                          archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c } });
+                                          archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i } });
     };
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
     var actualizarVista = function () {
@@ -2852,12 +2852,12 @@
         pintarEleccion();
       });
       subir = h('div', { class: 'campo-rh' },
-        h('label', { class: 'etiqueta', for: 'mod-archivo', text: m.adjunto.etiqueta + ' (se une detrás del escrito: PDF o fotos)' }), elegir,
+        h('label', { class: 'etiqueta', for: 'mod-archivo', text: m.adjunto.etiqueta + (m.adjunto.opcional ? ' (optativo: si lo subís, se une detrás del escrito en un solo PDF; PDF o fotos)' : ' (se une detrás del escrito: PDF o fotos)') }), elegir,
         ed.archivos.map(function (a, i) {
           return h('div', { class: 'meta' }, '📎 ' + a.name + ' · ' + (a.size / 1048576).toFixed(1) + ' MB ',
             h('button', { class: 'btn chico', type: 'button', 'aria-label': 'Quitar ' + a.name, onclick: function () { ed.archivos.splice(i, 1); pintarEleccion(); } }, 'Quitar'));
         }),
-        ed.archivos.length ? null : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
+        ed.archivos.length || m.adjunto.opcional ? null : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
     }
 
     // Lo que tiene que estar en el SAE antes de pedirlo (p. ej. la inhibición): Carlos lo tilda.
