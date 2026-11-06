@@ -1228,7 +1228,7 @@
 
     // Tarjetas: una por sección (como en Para firmar y Agenda). Al abrir una, se ve solo esa sección.
     var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
-    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar', alta: 'Agregar un juicio' };
+    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar', alta: 'Agregar un juicio', registro: 'Registro de Honorarios (Fiscalía)' };
     if (hon.grupo && nombres[hon.grupo]) {
       cont.appendChild(cabeceraGrupo(nombres[hon.grupo], function () { abrirGrupoHon(null); }));
       if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
@@ -1237,6 +1237,7 @@
       else if (hon.grupo === 'tramitados') pintarTramitados(cont, d, per);
       else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
       else if (hon.grupo === 'alta') pintarAltaHon(cont, d);
+      else if (hon.grupo === 'registro') pintarRegistroFiscalia(cont, d);
       cont.appendChild(pieGrupo(function () { abrirGrupoHon(null); }));
       return;
     }
@@ -1279,6 +1280,7 @@
                  alerta: problemasFact || m.enTexto.length ? '⚠ Hay algo para verificar' : '' },
       tramitados: { numero: d.semana.lista.length, unidad: 'la semana pasada', info: ['Agosto – octubre: ' + d.primer.lista.length] },
       revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] },
+      registro: datosTarjetaRegistro(d.registro),
       alta: { info: ['Un juicio del MAESTRO que no está en la planilla', 'Fila nueva en orden alfabético'],
               alerta: faltan.length ? (faltan.length === 1 ? '1 juicio' : faltan.length + ' juicios') + ' para revisar si falta' : '' }
     };
@@ -1288,6 +1290,80 @@
     });
     cont.appendChild(tarjetas);
     buscador.tapar(tarjetas);
+  }
+
+  // ───────── Registro de Honorarios: los mails de Fiscalía de Estado (FiscaliaSrv.gs, pedido de Carlos del 06/11/2026) ─────────
+  var ESTADO_REGISTRO = { VERIFICADO: 'caja-ok', PRESENTADO: '', OBSERVADO: 'caja-aviso', RECHAZADO: 'caja-peligro' };
+
+  function datosTarjetaRegistro(R) {
+    if (!R || R.error) return { info: [R && R.error ? 'Error: ' + R.error : 'Falta pegar el código nuevo en Apps Script'] };
+    var vivos = R.casos.filter(function (c) { return !c.descartado; });
+    var ver = vivos.filter(function (c) { return c.estado === 'VERIFICADO'; }).length, sinJuicio = vivos.filter(function (c) { return !c.e; }).length;
+    return { numero: vivos.length - ver, unidad: 'sin verificar', info: ['Verificados: ' + ver, R.revisado ? 'Gmail revisado el ' + new Date(R.revisado).toLocaleDateString('es-AR') : 'Gmail todavía sin revisar'],
+             alerta: !R.etiqueta ? 'Falta la etiqueta de Gmail' : sinJuicio ? sinJuicio + (sinJuicio === 1 ? ' caso' : ' casos') + ' sin juicio' : '' };
+  }
+
+  function pintarRegistroFiscalia(cont, d) {
+    var R = d.registro;
+    var btn = h('button', { class: 'btn primario', type: 'button' }, 'Revisar Gmail ahora');
+    btn.addEventListener('click', function () {
+      btn.disabled = true; btn.textContent = 'Revisando los mails de Fiscalía…';
+      apiPost({ a: 'honRegRevisar', pin: hon.pin }).then(function (r) {
+        aviso(r.leidos ? r.leidos + ' mails leídos · ' + r.nuevos + ' casos nuevos · ' + r.anotados + ' anotados en HONORARIOS' : 'No había mails nuevos');
+        cargarHonorarios();
+      }).catch(function (e) { btn.disabled = false; btn.textContent = 'Revisar Gmail ahora'; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    cont.appendChild(h('div', { class: 'panel' },
+      h('p', { class: 'ayuda chica', text: 'Los lunes el sistema lee la etiqueta "REGISTRO HONORARIOS" de Gmail: anota en HONORARIOS el Nº de expediente del Registro y la fecha de presentación (solo si la celda está vacía) y pinta de verde el Nº cuando Fiscalía lo VERIFICA.' }),
+      R && !R.error && !R.etiqueta ? h('div', { class: 'alerta', text: 'Todavía no existe la etiqueta "REGISTRO HONORARIOS" en Gmail: mientras tanto se buscan los mails de fiscaliatucuman.gob.ar igual. Cómo crearla: tocá "?" y buscá "etiqueta".' }) : null,
+      h('div', { class: 'botones' }, btn)));
+    if (!R || R.error) { cont.appendChild(h('p', { class: 'error', text: R && R.error ? R.error : 'El servidor todavía no tiene esta función: falta pegar el código nuevo en Apps Script.' })); return; }
+    var casos = R.casos.filter(function (c) { return !c.descartado; });
+    if (!casos.length) { cont.appendChild(h('p', { class: 'ayuda', text: 'No hay casos todavía. Tocá "Revisar Gmail ahora".' })); return; }
+    casos.forEach(function (c) { cont.appendChild(tarjetaRegistro(c, d)); });
+  }
+
+  function tarjetaRegistro(c, d) {
+    var area = h('div', { class: 'area-accion' });
+    var card = h('div', { class: 'panel ' + (ESTADO_REGISTRO[c.estado] != null ? ESTADO_REGISTRO[c.estado] : 'caja-aviso') },
+      h('div', { class: 'fila-panel' }, h('b', { text: 'Registro ' + c.nro }), h('span', { class: 'chip-tipo' + (c.estado === 'VERIFICADO' ? '' : ' cancela'), text: c.estado === 'VERIFICADO' ? '✓ VERIFICADO' : c.estado })),
+      h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Presentado el ' + (c.presentado ? fechaIso(c.presentado) : '—') + (c.estado !== 'PRESENTADO' && c.fechaEstado ? ' · ' + c.estado.toLowerCase() + ' (trámite del ' + fechaIso(c.fechaEstado) + ')' : '') + (c.obs ? ' · ' + c.obs : '') }),
+      c.e ? h('div', { style: 'margin-top:4px' }, h('b', { text: c.d }), ' · Expte. ' + c.e) : h('div', { style: 'margin-top:4px', text: '¿De qué juicio es? Fiscalía no lo dice en el mail.' }),
+      c.anotado ? h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Anotado en HONORARIOS el ' + fechaIso(c.anotado) + (c.identificado ? ' · juicio por ' + c.identificado.toLowerCase() : '') }) : null,
+      c.aviso ? h('div', { class: 'ayuda chica', style: 'color:inherit', text: '⚠️ ' + c.aviso }) : null,
+      h('div', { class: 'botones-hon' },
+        c.pdf ? h('a', { class: 'btn', href: c.pdf, target: '_blank', rel: 'noopener' }, 'Nota de Fiscalía ↗') : null,
+        c.e && filasEnHon(d, c.e).length ? linkHon(filasEnHon(d, c.e)[0]) : null,
+        h('button', { class: 'btn', type: 'button', onclick: function () { elegirJuicioRegistro(area, c, d); } }, c.e ? 'Cambiar juicio' : 'Elegir el juicio'),
+        c.e ? null : h('button', { class: 'btn', type: 'button', onclick: function () {
+          if (!confirm('¿Sacar el caso ' + c.nro + ' de la lista? (por ejemplo, si no es de honorarios)')) return;
+          apiPost({ a: 'honRegAsignar', pin: hon.pin, nro: c.nro, descartar: true }).then(function () { c.descartado = true; pintarHonorarios(); aviso('Caso sacado de la lista'); })
+            .catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
+        } }, 'No es de honorarios')),
+      area);
+    return card;
+  }
+
+  /** Buscar el juicio en HONORARIOS (mismo buscador) y asignarlo: completa la fila. */
+  function elegirJuicioRegistro(area, c, d) {
+    area.textContent = '';
+    var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Expediente o deudor (de HONORARIOS)', 'aria-label': 'Juicio del caso ' + c.nro });
+    var lista = h('div');
+    inp.addEventListener('input', function () {
+      lista.textContent = '';
+      var t = inp.value.trim();
+      if (!t) return;
+      buscarHon(d, t).slice(0, 6).forEach(function (x) {
+        lista.appendChild(h('button', { class: 'btn', type: 'button', style: 'display:block;margin:4px 0;text-align:left', onclick: function () {
+          if (!confirm('¿El Registro ' + c.nro + ' es de ' + x.d + ' (' + x.e + ')? Se anota en HONORARIOS si la celda está vacía.')) return;
+          apiPost({ a: 'honRegAsignar', pin: hon.pin, nro: c.nro, e: x.e }).then(function (r) {
+            Object.assign(c, r.caso); aviso('Listo: ' + x.d); pintarHonorarios();
+          }).catch(function (e) { aviso('No se pudo: ' + traducirError(e)); });
+        } }, (x.d || '—') + ' · ' + x.e));
+      });
+    });
+    area.appendChild(h('div', { class: 'panel' }, inp, lista));
+    inp.focus();
   }
 
   // ───────── Buscador de HONORARIOS (pedido de Carlos, 06/11/2026): el mismo de la pestaña Buscar, sobre las filas de la planilla ─────────
