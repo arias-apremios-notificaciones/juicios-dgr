@@ -2718,7 +2718,8 @@
     if (!manual.tipo) { caja.appendChild(h('p', { class: 'ayuda', text: 'Elegí arriba el modelo de escrito.' })); return; }
     if (!manual.previa) {
       var buscando = manual.tipo === 'COMUNICO_IVP' ? 'Buscando el IVP en Gmail y consultando el SAE…'
-                   : esModelo(manual.tipo) && Modelos.MODELOS[manual.tipo].prueba ? 'Consultando el SAE y buscando la prueba en la contestación de excepciones…' : 'Consultando el SAE…';
+                   : esModelo(manual.tipo) && Modelos.MODELOS[manual.tipo].prueba ? 'Consultando el SAE y buscando la prueba en la contestación de excepciones…'
+                   : esModelo(manual.tipo) && Modelos.MODELOS[manual.tipo].edictos ? 'Consultando el SAE y buscando los edictos en el Boletín Oficial…' : 'Consultando el SAE…';
       caja.appendChild(h('div', { class: 'cargando-txt', text: buscando })); return;
     }
 
@@ -2763,12 +2764,15 @@
       var auto = { demandado: f.d, cuit: f.c, importe: f.i, hoy: isoADmy(hoyInput()) }, iniciales = {};
       campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
       manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales, requisitos: [] };
+      var g0 = p.edictos && p.edictos.grupos[p.edictos.elegido];
+      manual.ed.grupoEdicto = g0 ? p.edictos.elegido : -1;
+      manual.ed.edictos = g0 ? { primero: g0.primero.id, ultimo: g0.ultimo.id } : null;
     }
     var ed = manual.ed;
     var requisitos = m.requisitos || [];
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
-      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos,
+      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos,
                                           archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i } });
     };
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
@@ -2792,6 +2796,7 @@
           h('div', { class: 'ayuda chica', text: 'Revisala antes de generar. "Texto habitual" vuelve al modelo.' }))
       : h('div', { class: 'alerta', text: 'No encontré la prueba ofrecida en la contestación de excepciones (ni en el Drive ni en el SAE)' +
           (p.prueba.error ? ' — ' + p.prueba.error : '') + '. Quedó el texto habitual: revisalo y completalo.' }));
+    if (p.edictos) caja.appendChild(panelEdictos(p.edictos, ed));
 
     var titulo = h('textarea', { id: 'mod-titulo', class: 'campo-form', rows: '2' });   // en el teléfono el título largo no entra en un renglón
     titulo.value = ed.titulo;
@@ -2868,7 +2873,9 @@
           return h('div', { class: 'meta' }, '📎 ' + a.name + ' · ' + (a.size / 1048576).toFixed(1) + ' MB ',
             h('button', { class: 'btn chico', type: 'button', 'aria-label': 'Quitar ' + a.name, onclick: function () { ed.archivos.splice(i, 1); pintarEleccion(); } }, 'Quitar'));
         }),
-        ed.archivos.length || m.adjunto.opcional ? null : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
+        ed.archivos.length || m.adjunto.opcional ? null
+          : ed.edictos ? h('div', { class: 'ayuda chica', text: 'No hace falta: van los edictos del Boletín Oficial (si subís archivos, van esos en su lugar).' })
+          : h('div', { class: 'ayuda chica', text: 'Falta subir el archivo.' }));
     }
 
     // Lo que tiene que estar en el SAE antes de pedirlo (p. ej. la inhibición): Carlos lo tilda.
@@ -2900,11 +2907,12 @@
       if (p.pendiente && !confirm('Ya hay un escrito para firmar de este expediente. ¿Generar igual?')) return;
       manual.generando = true; pintarEleccion();
       Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
-        return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, campos: ed.campos, archivos: archivos });
+        return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, campos: ed.campos, archivos: archivos,
+                         edictos: archivos.length ? null : ed.edictos });
       }).then(function (r) {
         manual.generando = false;
         r.sinArca = !ed.arca && !ed.archivos.length;
-        r.anexo = [ed.archivos.length ? m.adjunto.etiqueta.toLowerCase() : '', ed.arca ? 'la constancia de ARCA' : ''].filter(Boolean).join(' y ');
+        r.anexo = [ed.archivos.length ? m.adjunto.etiqueta.toLowerCase() : r.edictos ? 'los edictos del Boletín Oficial' : '', ed.arca ? 'la constancia de ARCA' : ''].filter(Boolean).join(' y ');
         manual.resultado = r; manual.ed = null; pintarEleccion();
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);
         if (r.arca) esperarArca(r, 0);
@@ -2912,6 +2920,44 @@
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
     actualizarVista();
+  }
+
+  /**
+   * DEVUELVO PUBLICACION DE EDICTOS: lo que encontró el servidor en el Boletín Oficial (Edictos.js).
+   * Elegir otro edicto cambia las fechas y lo que se une; "No unir" deja subirlos a mano.
+   */
+  function panelEdictos(pe, ed) {
+    if (pe.error || !pe.grupos.length) {
+      return h('div', { class: 'alerta', text: (pe.error ? 'No pude consultar el Boletín Oficial: ' + pe.error
+        : 'No encontré edictos de este juicio en el Boletín Oficial.') + ' Completá las fechas y subí los edictos a mano.' });
+    }
+    var g = pe.grupos[ed.grupoEdicto];
+    var rotulo = function (x) {
+      return x.nombreClase + ' · ' + (x.dias ? x.dias + ' días' : 'días sin leer') + ' · ' + x.primero.fecha + (x.publicados > 1 ? ' al ' + x.ultimo.fecha : '') +
+        (x.dias && x.publicados !== x.dias ? ' (' + x.publicados + ' de ' + x.dias + ')' : '');
+    };
+    var avisos = [];
+    if (g && !g.completo) avisos.push('Todavía se está publicando: van ' + g.publicados + ' de ' + g.dias + ' días. Esperá al último día.');
+    if (g && g.dias && g.publicados > g.dias) avisos.push('Se publicó ' + g.publicados + ' veces y el edicto ordena ' + g.dias + ' días: revisá cuál es el último.');
+    if (g && !g.dias) avisos.push('No pude leer en el texto por cuántos días se publica: revisá "quinto o décimo".');
+    if (g && g.clase !== 'INTIMACION') avisos.push('Este edicto notifica ' + g.nombreClase.toLowerCase() + ', no la intimación de pago: revisá si corresponde este escrito.');
+    var sel = h('select', { id: 'mod-edicto', class: 'campo-form' },
+      pe.grupos.map(function (x, i) { return h('option', { value: String(i), selected: i === ed.grupoEdicto }, rotulo(x)); }),
+      h('option', { value: '-1', selected: ed.grupoEdicto < 0 }, 'No unir los del Boletín (los subo yo)'));
+    sel.addEventListener('change', function () {
+      var i = Number(sel.value), x = pe.grupos[i];
+      ed.grupoEdicto = x ? i : -1;
+      ed.edictos = x ? { primero: x.primero.id, ultimo: x.ultimo.id } : null;
+      if (x) { ed.campos['PRIMER DIA'] = x.primero.fecha; ed.campos['ULTIMO DIA'] = x.ultimo.fecha; if (x.ordinal) ed.campos['DIA DE PUBLICACION'] = x.ordinal; }
+      pintarEleccion();
+    });
+    return h('div', { class: 'panel ' + (g && !avisos.length ? 'caja-ok' : 'caja-aviso') },
+      h('b', { text: g ? 'Edictos del Boletín Oficial: se unen el primer y el último día' : 'Edictos del Boletín Oficial: no se unen' }),
+      h('label', { class: 'etiqueta', for: 'mod-edicto', text: pe.grupos.length > 1 ? 'Este juicio tiene ' + pe.grupos.length + ' edictos. ¿Cuál?' : 'Edicto' }), sel,
+      g ? h('div', { class: 'ayuda chica' },
+        h('a', { href: g.primero.url, target: '_blank', rel: 'noopener', text: 'Primer día (' + g.primero.fecha + ') ↗' }), ' · ',
+        h('a', { href: g.ultimo.url, target: '_blank', rel: 'noopener', text: 'Último día (' + g.ultimo.fecha + ') ↗' })) : null,
+      avisos.map(function (t) { return h('div', { class: 'ayuda chica', text: '⚠️ ' + t }); }));
   }
 
   // ───────── Configuración ─────────

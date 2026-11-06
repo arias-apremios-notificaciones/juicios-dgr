@@ -31,8 +31,19 @@ var Modelos = (function () {
   var DOCUMENTAL_HABITUAL = 'Las constancias de autos, en especial el escrito de demanda, las boletas de deuda -cargos tributarios- que sirven de base a la presente acción y el escrito de contestación de Excepciones.';
   var INFORMATIVA_HABITUAL = 'Solicito se libre oficio a la División Control de Cobros Judiciales de la DGR, a los fines de que por su intermedio remita copia digitalizada del expediente Nº {EXPEDIENTE ADMINISTRATIVO}.';
   var CUADERNOS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
+  // Lo copiado de la contestación se acomoda a la redacción de los escritos base ("Las constancias de autos…", "Solicito se libre oficio…").
+  function acomodarPrueba(clase, p) {
+    p = String(p).replace(/\s+/g, ' ').trim().replace(/^[•\-–]\s*/, '');
+    p = p.replace(/[–—]\s*cargos tributarios\s*[-–—]/gi, '-cargos tributarios-');
+    if (clase === 'DOCUMENTAL') p = p.replace(/^(?:las\s+)?constancias de autos/i, 'Las constancias de autos');
+    else p = p.replace(/^(?:solicito\s+)?(?:que\s+)?se\s+libre(n)?\s+oficio(s)?/i, function (x, n, s) { return 'Solicito se libre' + (n || '') + ' oficio' + (s || ''); })
+              .replace(/^(?:librar|libra|oficio)\s+(?:oficio\s+)?(a|al)\b/i, 'Solicito se libre oficio $1');
+    if (!/[.:;]$/.test(p)) p += '.';
+    return p.charAt(0).toUpperCase() + p.slice(1);
+  }
   function cuerpoPrueba(clase, parrafos) {
     var documental = clase === 'DOCUMENTAL';
+    parrafos = parrafos.map(function (p) { return acomodarPrueba(clase, p); });
     return ['I.- Ofrezco prueba ' + (documental ? 'documental' : 'informativa') + ':'].concat(parrafos,
       ['II.- Petitorio:', 'Por lo expuesto, a V.S. pido:',
        documental ? 'Se tenga por ofrecida en tiempo y forma la prueba y se forme el presente cuaderno.-'
@@ -255,6 +266,8 @@ var Modelos = (function () {
                { id: 'DIA DE PUBLICACION', etiqueta: 'El último día fue el… (quinto si se publicó 5 días; décimo si 10)', tipo: 'opciones', opciones: ['quinto', 'décimo'] }],
       arca: true,
       seguimiento: 'DEVUELVO PUBLICACION DE EDICTOS. PIDO SENTENCIA.',
+      // edictos: el servidor busca las publicaciones en el Boletín Oficial (Edictos.js), completa las fechas y une el primer y el último día.
+      edictos: true,
       adjunto: { etiqueta: 'Primer y último edicto publicados', archivo: 'EDICTOS PUBLICADOS' }
     },
     // "ESTRADA FRANCISCO JOAQUIN (4461-24) - EJECUTO SENTENCIA. PIDO EMBARGO SOBRE INMUEBLE"
@@ -410,7 +423,8 @@ var Modelos = (function () {
       cuerpo: ['Atento a lo informado por el oficial de justicia actuante, en cuanto a que en el domicilio del demandado no existe numeración a la vista, motivo por el cual se devolvió la manda judicial sin diligenciar, solicito se libre oficio a la Dirección General de Catastro, a fin de que indique la numeración de los inmuebles colindantes al del demandado sito en {DOMICILIO}, sus medidas, características y cualquier otro dato que permita su correcta individualización, a los fines de practicar una nueva diligencia.'],
       campos: [{ id: 'DOMICILIO', etiqueta: 'Domicilio del demandado (ej. Almirante Brown 78 - Lules)', tipo: 'texto' }]
     },
-    // ── 06/11/2026 (sin sellar): cuadernos de prueba de las excepciones ──
+    // ── Sellados el 06/11/2026: cuadernos de prueba de las excepciones (sin la 1ª línea "PROMUEVO DEMANDA…" del Word;
+    //    cierre Proveer de Conformidad / JUSTICIA; lo copiado de la contestación se acomoda al escrito base) ──
     // "CUENCA DULCE SRL (3624-26-A1) - OFREZCO PRUEBA DOCUMENTAL A1"
     PRUEBA_DOCUMENTAL: {
       nombre: 'OFREZCO PRUEBA DOCUMENTAL', claves: 'prueba documental instrumental cuaderno excepciones apertura a prueba ofrezco ofrecimiento',
@@ -499,7 +513,7 @@ var Modelos = (function () {
     return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null, requisitos: (m.requisitos || []).slice(),
              variantes: (m.variantes || []).map(function (v) { return { nombre: v.nombre, cuerpo: v.cuerpo.slice() }; }),
              campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', defecto: c.defecto || '', opciones: (c.opciones || []).slice() }; }),
-             prueba: m.prueba || '', agregados: ag };
+             prueba: m.prueba || '', edictos: !!m.edictos, agregados: ag };
   }
 
   /** Valor automático de un campo (auto = { demandado, cuit, importe, hoy } del juicio). */
@@ -587,7 +601,8 @@ var Modelos = (function () {
       if (!/^[A-Z]\d{1,2}$/.test(cuaderno)) return { ok: false, error: 'El cuaderno de prueba va como A1, A2…' };
     }
     var subidos = (ed.archivos || []).length;
-    if (m.adjunto && !m.adjunto.opcional && !subidos) return { ok: false, error: 'Falta subir el archivo: ' + m.adjunto.etiqueta.toLowerCase() + '.' };
+    var edictosAuto = !!(m.edictos && ed.edictos && ed.edictos.primero);   // los del Boletín Oficial cuentan como lo subido
+    if (m.adjunto && !m.adjunto.opcional && !subidos && !edictosAuto) return { ok: false, error: 'Falta subir el archivo: ' + m.adjunto.etiqueta.toLowerCase() + '.' };
     if (subidos > MAX_ARCHIVOS) return { ok: false, error: 'Son muchos archivos (máximo ' + MAX_ARCHIVOS + ').' };
     var sinPunto = titulo.replace(/[\s.\-–]+$/, '');
     // Seguimiento propio del modelo (p. ej. con el saldo) solo si el título quedó como en el modelo.
