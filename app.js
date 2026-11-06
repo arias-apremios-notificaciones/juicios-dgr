@@ -770,6 +770,28 @@
     });
   }
 
+  /**
+   * Sube la constancia de ARCA (el PDF que baja de ARCA) a la carpeta CONSTANCIA ARCA; desde ahí se une a los escritos nuevos.
+   * Los escritos que ya están para firmar quedan con la constancia que tenían.
+   */
+  function botonSubirArca(texto, principal) {
+    var elegir = h('input', { type: 'file', accept: 'application/pdf', hidden: true, 'aria-label': texto });
+    var btn = h('button', { class: 'btn' + (principal ? ' primario' : ''), type: 'button', onclick: function () { elegir.click(); } }, texto);
+    elegir.addEventListener('change', function () {
+      var f = elegir.files[0];
+      elegir.value = '';
+      if (!f) return;
+      if (!/\.pdf$/i.test(f.name) && f.type !== 'application/pdf') { aviso('Elegí el PDF de la constancia que baja de ARCA.'); return; }
+      if (!confirm('¿Subir "' + f.name + '" como constancia de ARCA? Desde ahora se une a los escritos nuevos.')) return;
+      btn.disabled = true; btn.textContent = 'Subiendo…';
+      prepararArchivo(f).then(function (a) { return apiPost({ a: 'subirArca', mime: 'application/pdf', datos: a.datos }); }).then(function (r) {
+        aviso('Constancia guardada: ' + r.nombre);
+        firmar.datos = null; cargarFirmar();
+      }).catch(function (e) { btn.disabled = false; btn.textContent = texto; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    return h('span', null, btn, elegir);
+  }
+
   /** Los escritos ya marcados sin conexión no se muestran como pendientes. */
   function quitarEnCola(d) {
     var ids = escritosEnCola();
@@ -896,7 +918,8 @@
       cont.appendChild(h('div', { class: 'panel aviso-arca' },
         h('b', { text: '⚠ Falta la constancia de ARCA de ' + d.arca.mes.toLowerCase() }),
         h('div', { text: 'Bajala de ARCA y guardala en la carpeta CONSTANCIA ARCA: cada pedido de sentencia se sube junto con ella.' }),
-        h('div', { style: 'margin-top:6px' }, h('a', { href: d.arca.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir carpeta CONSTANCIA ARCA ↗' }))));
+        h('div', { class: 'botones', style: 'margin-top:6px' }, botonSubirArca('Subir constancia de ARCA', true),
+          h('a', { href: d.arca.carpeta, target: '_blank', rel: 'noopener', text: 'Abrir carpeta CONSTANCIA ARCA ↗' }))));
     } else if (d.arca && d.arca.archivo) {
       var sinArca = d.porFirmar.filter(function (x) { return !x.arca && grupoFirmar(x) !== 'ivp'; }).length;
       var panelArca = h('div', { class: 'panel ok-arca' }, '✓ Constancia de ARCA de ' + d.arca.mes.toLowerCase() + ': ',
@@ -911,6 +934,7 @@
         });
         panelArca.appendChild(h('div', null, btnArca));
       }
+      panelArca.appendChild(h('div', { style: 'margin-top:8px' }, botonSubirArca('Subir una constancia nueva', false)));
       cont.appendChild(panelArca);
     }
 
