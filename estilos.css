@@ -537,3 +537,10 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .cuenta-dgr summary { cursor: pointer; }
 .cuenta-dgr-datos { white-space: pre-wrap; font: inherit; font-size: 14px; line-height: 1.5; margin: 10px 0 6px; padding: 10px 12px;
   background: var(--fondo); border-radius: 8px; user-select: text; -webkit-user-select: text; }
+
+/* Comprobantes de honorarios (carta de pago, recibo, factura) */
+.form-hon .casilla { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; line-height: 1.35; }
+.form-hon .casilla input { margin-top: 3px; flex: none; }
+.dato-factura { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(0,0,0,.08); }
+.dato-factura .etiqueta { grid-column: 1 / -1; }
+.dato-factura b { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }

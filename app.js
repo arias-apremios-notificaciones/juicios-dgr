@@ -1792,6 +1792,8 @@
           'Plan de ' + n.value + ' cuotas de ' + importe(Number(mc.value)) + ', 1ª el ' + isoADmy(pr.value) + ', para ' + x.d + ' (' + x.e + '). ¿Confirmás?', 'Plan guardado');
       });
     } else if (tipo === 'comprobante') {
+      pintarComprobante(area, x, d, form);
+    } else if (tipo === 'subir') {
       var cc = camposComprobante(true);
       form([h('div', { class: 'ayuda chica', text: 'Factura, recibo o carta de pago (PDF o foto). Se guarda en el Drive y queda como enlace en la columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS: tocándolo se abre.' }),
             cc.nodo, h('button', { class: 'btn primario', type: 'submit' }, 'Guardar comprobante')], function () {
@@ -1809,6 +1811,125 @@
   }
 
   // ───────── Comprobantes de pago: columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS ─────────
+  // Generar carta de pago o recibo, o emitir la factura en ARCA (pedido de Carlos, 04/11/2026, punto 3; textos en comprobantes.js).
+  var MODOS_COMPROBANTE = [['CARTA', 'Carta de pago'], ['RECIBO', 'Recibo'], ['FACTURA', 'Factura (ARCA)'], ['SUBIR', 'Subir un archivo']];
+
+  function pintarComprobante(area, x, d, form) {
+    var caja = h('div'), botones = {};
+    var elegir = function (modo) {
+      Object.keys(botones).forEach(function (k) { botones[k].className = k === modo ? 'activo' : ''; });
+      caja.textContent = '';
+      if (modo === 'SUBIR') { var tmp = h('div'); accion(tmp, 'subir', x, d); caja.appendChild(tmp); }
+      else if (modo === 'FACTURA') caja.appendChild(panelFactura(x));
+      else caja.appendChild(formComprobante(modo, x));
+    };
+    area.appendChild(h('div', { class: 'form-hon' },
+      h('div', { class: 'ayuda chica', text: 'La carta de pago y el recibo se generan en PDF (con tu firma y sello) y quedan enlazados en la columna AGREGAR FACTURA/CARTA DE PAGO. La factura la emitís en ARCA y después la subís.' }),
+      h('div', { class: 'seg' }, MODOS_COMPROBANTE.map(function (m) { return (botones[m[0]] = h('button', { type: 'button', onclick: function () { elegir(m[0]); } }, m[1])); }))));
+    area.appendChild(caja);
+  }
+
+  /** Datos del comprobante que salen del juicio: CUIT del MAESTRO, saldo o cuota, nominación. */
+  function datosBaseComprobante(x) {
+    var k = Buscador.exptesDe(x.e)[0], fm = estado.filas.filter(function (f) { return Buscador.exptesDe(f.e)[0] === k; })[0];
+    return { demandado: x.d, exptes: x.e, nom: x.n || (fm && fm.n) || '', documento: fm && fm.c ? String(fm.c).replace(/\D/g, '') : '',
+             honorarios: x.plan ? x.plan.monto : (x.saldo != null ? x.saldo : x.monto) };
+  }
+
+  function formComprobante(tipo, x) {
+    var b = datosBaseComprobante(x), editado = null;
+    var campo = function (etq, attrs) { var i = h('input', Object.assign({ class: 'campo-form', 'aria-label': etq }, attrs || {})); return { i: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etq }), i) }; };
+    var pagador = campo('Quién paga (vacío = el demandado)', { placeholder: x.d });
+    var trato = h('select', { class: 'campo-form', 'aria-label': 'Trato' }, [['SR', 'el Sr.'], ['SRA', 'la Sra.'], ['EMPRESA', 'empresa (sin Sr./Sra.)']].map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
+    var docu = campo(tipo === 'CARTA' ? 'CUIT (optativo)' : 'CUIT o DNI (optativo)', { inputmode: 'numeric', value: b.documento });
+    var exptes = campo('Expediente (si son varios del mismo deudor: 19633/24; 7133/25)', { value: b.exptes });
+    var jz = Comprobantes.juzgado(b.nom), juz = campo('Juzgado: Cobros y Apremios de la…', { value: jz, placeholder: 'I° Nominación' });
+    var hon = campo(tipo === 'RECIBO' ? 'Honorarios cobrados ($)' : 'Honorarios ($)', { inputmode: 'decimal', value: b.honorarios ? String(b.honorarios).replace('.', ',') : '' });
+    var apo = campo('Aportes previsionales ($, optativo)', { inputmode: 'decimal' });
+    var conMontos = h('input', { type: 'checkbox' });
+    var concepto = h('select', { class: 'campo-form', 'aria-label': 'Concepto' }, [['TOTAL', 'Pago total'], ['CUENTA', 'Pago a cuenta'], ['CUOTA', 'Pago de una cuota']].map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
+    var cuotaN = campo('Cuota N°', { type: 'number', min: '1', value: x.plan ? String(x.plan.pagadas + 1) : '' }), cuotaDe = campo('de', { type: 'number', min: '1', value: x.plan ? String(x.plan.cantidad) : '' });
+    var fecha = campo('Fecha del recibo', { type: 'date', value: hoyInput() });
+    var firma = h('input', { type: 'checkbox', checked: true });
+    if (x.plan) concepto.value = 'CUOTA';
+    // El trato sigue al nombre (empresa: sin "Sr.") hasta que Carlos lo cambie a mano.
+    var tratoManual = false;
+    trato.value = Comprobantes.tratoPorNombre(x.d);
+    trato.addEventListener('change', function () { tratoManual = true; });
+    pagador.i.addEventListener('input', function () { if (!tratoManual) trato.value = Comprobantes.tratoPorNombre(pagador.i.value || x.d); });
+    var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
+    var datos = function () {
+      return { demandado: x.d, pagador: pagador.i.value, trato: trato.value, documento: docu.i.value.trim(), exptes: exptes.i.value, juzgado: juz.i.value.trim(),
+               honorarios: hon.i.value, aportes: apo.i.value, conMontos: conMontos.checked, concepto: concepto.value,
+               cuota: { n: cuotaN.i.value, de: cuotaDe.i.value }, fecha: fecha.i.value };
+    };
+    var armado = function () { return Comprobantes.armar(tipo, datos()); };
+    var pintarVista = function () {
+      vista.textContent = '';
+      cuotaN.nodo.hidden = cuotaDe.nodo.hidden = concepto.value !== 'CUOTA';
+      if (editado) {
+        var ta = h('textarea', { class: 'campo-form', rows: '10', 'aria-label': 'Texto del comprobante' });
+        ta.value = editado.join('\n\n');
+        ta.addEventListener('input', function () { editado = ta.value.split(/\n\s*\n/).map(function (p) { return p.trim(); }).filter(String); });
+        vista.appendChild(h('div', { class: 'ayuda chica', text: 'Texto editado (solo para este comprobante). Un renglón en blanco separa los párrafos.' }));
+        vista.appendChild(ta);
+        vista.appendChild(h('button', { class: 'btn chico', type: 'button', onclick: function () { editado = null; pintarVista(); } }, 'Volver al texto del modelo'));
+        return;
+      }
+      var r = armado();
+      if (!r.ok) { vista.appendChild(h('div', { class: 'error', text: r.error })); return; }
+      vista.appendChild(h('div', { class: 'ayuda chica', text: 'Así queda:' }));
+      if (r.titulo) vista.appendChild(h('b', { text: r.titulo }));
+      r.parrafos.forEach(function (p) { vista.appendChild(h('p', { text: p })); });
+      vista.appendChild(h('button', { class: 'btn chico', type: 'button', onclick: function () { editado = armado().parrafos.slice(); pintarVista(); } }, 'Editar el texto'));
+    };
+    var f = h('form', { class: 'form-hon' },
+      pagador.nodo, h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Trato' }), trato), docu.nodo, exptes.nodo, juz.nodo,
+      tipo === 'CARTA' ? h('label', { class: 'casilla' }, conMontos, ' Con montos ("cancelación total y definitiva… por un monto de…")') : null,
+      tipo === 'RECIBO' ? h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Concepto' }), concepto) : null,
+      tipo === 'RECIBO' ? h('div', { style: 'display:flex;gap:8px' }, cuotaN.nodo, cuotaDe.nodo) : null,
+      hon.nodo, apo.nodo, tipo === 'RECIBO' ? fecha.nodo : null,
+      h('label', { class: 'casilla' }, firma, ' Con mi firma y sello escaneados'),
+      vista, h('button', { class: 'btn primario', type: 'submit' }, tipo === 'CARTA' ? 'Generar carta de pago' : 'Generar recibo'));
+    f.addEventListener('input', function (ev) { if (!vista.contains(ev.target)) pintarVista(); });
+    f.addEventListener('change', function (ev) { if (!vista.contains(ev.target)) pintarVista(); });
+    f.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      var r = armado();
+      if (!r.ok) { aviso(r.error); return; }
+      var nombre = tipo === 'CARTA' ? 'la carta de pago' : 'el recibo';
+      if (!confirm('¿Generar ' + nombre + ' de ' + x.d + ' (' + x.e + ')?\n\nSe guarda en el Drive (COMPROBANTES DE PAGO) y queda enlazado en la columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS (fila ' + x.r + ').')) return;
+      var btn = f.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Generando…';
+      apiPost({ a: 'honGenComprobante', pin: hon.pin, r: x.r, e: x.e, tipo: tipo, datos: datos(), parrafos: editado, firma: firma.checked }).then(function (res) {
+        if (!res.ok) throw new Error(res.error || 'No se pudo');
+        f.replaceWith(h('div', { class: 'panel caja-ok' }, h('b', { text: 'Listo: ' + res.nombre }),
+          h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'En HONORARIOS: ' + res.celda }),
+          h('div', { class: 'botones-hon' }, h('a', { class: 'btn primario', href: res.url, target: '_blank', rel: 'noopener' }, 'Abrir el PDF ↗'))));
+        cargarHonorarios(true);
+      }).catch(function (e) { btn.disabled = false; btn.textContent = 'Generar de nuevo'; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    pintarVista();
+    return f;
+  }
+
+  /** Factura C en ARCA: la emite Carlos; acá están los datos para copiar y después se sube el PDF. */
+  function panelFactura(x) {
+    var b = datosBaseComprobante(x), fd = Comprobantes.datosFactura(b);
+    var fila = function (etq, valor) {
+      return h('div', { class: 'dato-factura' }, h('span', { class: 'etiqueta', text: etq }), h('b', { text: valor || '—' }),
+        valor ? h('button', { class: 'btn chico', type: 'button', onclick: function () { copiar(valor, etq + ' copiado'); } }, 'Copiar') : h('span'));
+    };
+    var area = h('div');
+    var subir = function () { area.textContent = ''; var t = h('div'); accion(t, 'subir', x, hon.datos); area.appendChild(t); var sel = t.querySelector('select'); if (sel) sel.value = 'FACTURA'; };
+    return h('div', { class: 'form-hon' },
+      h('div', { class: 'ayuda chica', text: '1) Entrá a ARCA con tu clave fiscal → "Comprobantes en línea" → Factura C (Concepto: Servicios). 2) Copiá estos datos. 3) Bajá el PDF y subilo acá: queda en FACTURAS ' + new Date().getFullYear() + ' y enlazado en HONORARIOS.' }),
+      fila('Receptor', fd.receptor), fila('CUIT / DNI', fd.documento), fila('Descripción', fd.descripcion), fila('Importe', fd.importe),
+      h('div', { class: 'botones-hon' },
+        h('a', { class: 'btn primario', href: Comprobantes.ARCA, target: '_blank', rel: 'noopener' }, 'Abrir ARCA ↗'),
+        h('button', { class: 'btn', type: 'button', onclick: subir }, 'Ya la emití: subir el PDF')),
+      area);
+  }
+
   var TIPOS_COMPROBANTE = [['FACTURA', 'Factura'], ['RECIBO', 'Recibo'], ['CARTA', 'Carta de pago']];
   var MAX_COMPROBANTE = 15 * 1024 * 1024;
 
