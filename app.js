@@ -1228,7 +1228,7 @@
 
     // Tarjetas: una por sección (como en Para firmar y Agenda). Al abrir una, se ve solo esa sección.
     var L = d.listado, m = d.mes, F = m.facturas, per = hon.periodo === 'primer' ? d.primer : d.semana;
-    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar', alta: 'Agregar un juicio', registro: 'Registro de Honorarios (Fiscalía)' };
+    var nombres = { semana: 'Listado de la semana', escritos: 'Escritos y Formulario RH', cobrado: 'Cobrado en ' + m.nombre.toLowerCase(), tramitados: 'Tramitados', revisar: 'Para revisar', alta: 'Agregar un juicio', registro: 'Registro de Honorarios (Fiscalía)', comprobantes: 'Carta de pago, recibo y factura' };
     if (hon.grupo && nombres[hon.grupo]) {
       cont.appendChild(cabeceraGrupo(nombres[hon.grupo], function () { abrirGrupoHon(null); }));
       if (hon.grupo === 'semana') pintarListadoSemanal(cont, d);
@@ -1238,6 +1238,7 @@
       else if (hon.grupo === 'revisar') pintarParaRevisar(cont, d);
       else if (hon.grupo === 'alta') pintarAltaHon(cont, d);
       else if (hon.grupo === 'registro') pintarRegistroFiscalia(cont, d);
+      else if (hon.grupo === 'comprobantes') pintarComprobantesHon(cont, d);
       cont.appendChild(pieGrupo(function () { abrirGrupoHon(null); }));
       return;
     }
@@ -1281,6 +1282,7 @@
       tramitados: { numero: d.semana.lista.length, unidad: 'la semana pasada', info: ['Agosto – octubre: ' + d.primer.lista.length] },
       revisar: { numero: d.cruces.length, unidad: 'diferencias', info: ['HONORARIOS, MAESTRO y SAE'] },
       registro: datosTarjetaRegistro(d.registro),
+      comprobantes: { info: ['Carta de pago y recibo en PDF, con firma y sello', 'Texto de la factura para ARCA'] },
       alta: { info: ['Un juicio del MAESTRO que no está en la planilla', 'Fila nueva en orden alfabético'],
               alerta: faltan.length ? (faltan.length === 1 ? '1 juicio' : faltan.length + ' juicios') + ' para revisar si falta' : '' }
     };
@@ -1372,6 +1374,8 @@
     if (hon.indice && hon.indice.datos === d) return hon.indice;
     var porFila = {}, items = [];
     var sumar = function (x) { if (x && x.r && !porFila[x.r]) { porFila[x.r] = x; items.push(x); } };
+    var G = (d.listado && d.listado.grupos) || {};
+    [].concat(G.CUOTA || [], G.PRIORIDAD || [], G.RESTO || []).forEach(sumar);   // primero los del listado: traen saldo y plan de cuotas
     (d.pendientes.activos || []).concat(d.pendientes.dormidos || []).forEach(sumar);
     ((d.listado && d.listado.cobrados) || []).concat((d.mes && d.mes.registrados) || []).forEach(sumar);
     var porClave = {};
@@ -1409,7 +1413,7 @@
           fm ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(fm.e); } }, 'Ver juicio') : null,
           h('button', { class: 'btn', type: 'button', onclick: function () { hon.buscar = ''; abrirGrupoHon('alta'); } }, 'Agregar un juicio a HONORARIOS')));
       }
-      lista.forEach(function (x) { res.appendChild(x.soloFila ? tarjetaSoloFila(x) : conVerJuicio(tarjetaHon(x), x)); });
+      lista.forEach(function (x) { res.appendChild(tarjetaBuscada(x, d)); });
     };
     inp.addEventListener('input', function () { usoHon(); pintar(); });
     return {
@@ -1418,17 +1422,58 @@
     };
   }
 
+  /** Resultado del buscador: los pendientes con todos sus botones (como en el listado); los cobrados, con Comprobante. */
+  function tarjetaBuscada(x, d) {
+    var cobrado = x.soloFila || x.pago || x.color === '#ffff00';
+    return conVerJuicio(cobrado ? conComprobante(x.soloFila ? tarjetaSoloFila(x) : tarjetaHon(x), x, d) : tarjetaSemana(x, d), x);
+  }
+
+  function conComprobante(card, x, d) {
+    var area = h('div', { class: 'area-accion' });
+    card.querySelector('.botones-hon').insertBefore(h('button', { class: 'btn', type: 'button', onclick: function () { accion(area, 'comprobante', x, d); } }, 'Comprobante'),
+                                                    card.querySelector('.botones-hon').firstChild);
+    card.appendChild(area);
+    return card;
+  }
+
+  // Los juicios viejos de HONORARIOS que no están en el MAESTRO no tienen ficha: se avisa en lugar de esconder el botón.
   function conVerJuicio(card, x) {
-    if (enMaestro(x.e)) card.lastChild.appendChild(h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio'));
+    card.querySelector('.botones-hon').appendChild(enMaestro(x.e)
+      ? h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio')
+      : h('span', { class: 'ayuda chica', text: 'Sin ficha: el expediente no está en el MAESTRO' }));
     return card;
   }
 
   /** Fila de la planilla sin saldo pendiente (cobrada antes o sin monto): solo el enlace a la fila. */
   function tarjetaSoloFila(x) {
-    return conVerJuicio(h('div', { class: 'item-rev' }, h('b', { text: x.d || 'Expte. ' + x.e }),
+    return h('div', { class: 'item-rev' }, h('b', { text: x.d || 'Expte. ' + x.e }),
       h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · fila ' + x.r + ' de HONORARIOS' }),
       h('div', { class: 'motivo tranquilo', text: 'Sin saldo pendiente en la planilla (cobrado o sin monto cargado).' }),
-      h('div', { class: 'botones-hon' }, linkHon(x.r))), x);
+      h('div', { class: 'botones-hon' }, linkHon(x.r)));
+  }
+
+  /** Tarjeta "Carta de pago, recibo y factura": elegir el juicio de HONORARIOS y armar el comprobante. */
+  function pintarComprobantesHon(cont, d) {
+    var inp = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Expediente, deudor o CUIT (de HONORARIOS)', 'aria-label': 'Juicio del comprobante' });
+    var lista = h('div', { class: 'man-lista' }), caja = h('div');
+    inp.addEventListener('input', function () {
+      lista.textContent = ''; caja.textContent = '';
+      var t = inp.value.trim();
+      if (!t) return;
+      buscarHon(d, t).slice(0, 8).forEach(function (x) {
+        lista.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () {
+          inp.value = x.e; lista.textContent = ''; caja.textContent = '';
+          var area = h('div', { class: 'area-accion' });
+          caja.appendChild(h('div', { class: 'item-rev' }, h('b', { text: x.d || 'Expte. ' + x.e }),
+            h('div', { class: 'meta', text: 'Expte. ' + x.e + (x.n ? ' · ' + x.n : '') + ' · fila ' + x.r + ' de HONORARIOS' }), area));
+          accion(area, 'comprobante', x, d);
+        } }, h('b', { text: x.d || 'Expte. ' + x.e }), h('span', { text: 'Expte. ' + x.e + (x.pago ? ' · cobrado ' + fechaIsoCorta(x.pago) : '') })));
+      });
+    });
+    cont.appendChild(h('div', { class: 'panel' },
+      h('p', { class: 'ayuda chica', text: 'Buscá el juicio en HONORARIOS (cobrado o pendiente) por expediente, deudor o CUIT.' }),
+      inp, lista, caja));
+    inp.focus();
   }
 
   /** Desde la pestaña Buscar: abre Honorarios con la búsqueda hecha (si está bloqueada, primero pide el PIN). */
@@ -1901,7 +1946,7 @@
       if (!confirm('¿Generar ' + nombre + ' de ' + x.d + ' (' + x.e + ')?\n\nSe guarda en el Drive (COMPROBANTES DE PAGO) y queda enlazado en la columna AGREGAR FACTURA/CARTA DE PAGO de HONORARIOS (fila ' + x.r + ').')) return;
       var btn = f.querySelector('button[type=submit]'); btn.disabled = true; btn.textContent = 'Generando…';
       apiPost({ a: 'honGenComprobante', pin: hon.pin, r: x.r, e: x.e, tipo: tipo, datos: datos(), parrafos: editado, firma: firma.checked }).then(function (res) {
-        if (!res.ok) throw new Error(res.error || 'No se pudo');
+        if (!res.ok) throw new Error(res.error || (res.faltan ? 'Falta completar: ' + res.faltan.join(', ') : 'No se pudo'));
         f.replaceWith(h('div', { class: 'panel caja-ok' }, h('b', { text: 'Listo: ' + res.nombre }),
           h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'En HONORARIOS: ' + res.celda }),
           h('div', { class: 'botones-hon' }, h('a', { class: 'btn primario', href: res.url, target: '_blank', rel: 'noopener' }, 'Abrir el PDF ↗'))));
