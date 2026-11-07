@@ -1925,7 +1925,13 @@
       if (!r.ok) { vista.appendChild(h('div', { class: 'error', text: r.error })); return; }
       vista.appendChild(h('div', { class: 'ayuda chica', text: 'Así queda:' }));
       if (r.titulo) vista.appendChild(h('b', { text: r.titulo }));
-      r.parrafos.forEach(function (p) { vista.appendChild(h('p', { text: p })); });
+      r.parrafos.forEach(function (p, i) {
+        // Las negritas como en el PDF (solo en el primer párrafo).
+        var partes = [], desde = 0;
+        (i === 0 ? Comprobantes.tramosNegrita(p, r.negritas) : []).forEach(function (t) { partes.push(p.slice(desde, t[0]), h('b', { text: p.slice(t[0], t[1]) })); desde = t[1]; });
+        partes.push(p.slice(desde));
+        vista.appendChild(h('p', null, partes));
+      });
       vista.appendChild(h('button', { class: 'btn chico', type: 'button', onclick: function () { editado = armado().parrafos.slice(); pintarVista(); } }, 'Editar el texto'));
     };
     var f = h('form', { class: 'form-hon' },

@@ -106,7 +106,8 @@ var Comprobantes = (function () {
    * @param d { demandado, exptes ("4032/24" o varios), juzgado (o nom de HONORARIOS), pagador (vacío = el demandado), trato SR|SRA|EMPRESA,
    *            documento (CUIT o DNI, optativo), honorarios, aportes (optativo), conMontos (carta), concepto TOTAL|CUENTA|CUOTA (recibo),
    *            cuota { n, de }, fecha 'yyyy-mm-dd' (recibo) }
-   * @return { ok, titulo, parrafos[], accion (nombre del archivo), celda (texto de la columna J), faltan[] } o { ok:false, error }
+   * @return { ok, titulo, parrafos[], negritas[] (textos del primer párrafo que van en negrita, en orden; cada uno se busca después
+   *           del anterior), accion (nombre del archivo), celda (texto de la columna J), faltan[] } o { ok:false, error }
    */
   function armar(tipo, d) {
     d = d || {};
@@ -133,7 +134,9 @@ var Comprobantes = (function () {
               (conMontos ? ' por un monto de ' + pesos(hon) + ' en concepto de honorarios' + (apo ? ' y ' + pesos(apo) + ' en concepto de aportes previsionales' : '') : '');
       if (tercero) t += '. Se deja debida constancia que ' + (TRATOS[trato] ? TRATOS[trato] + ' ' : '') + pagador + ' abona a cuenta y orden ' + juicioTexto('de', j, exptes);
       else t += ', correspondientes ' + juicioTexto('a', j, exptes);
-      return { ok: true, tipo: 'CARTA', titulo: '', parrafos: [t + '.' + RAYAS], accion: 'CARTA DE PAGO POR HONORARIOS' + (apo ? ' Y APORTES' : ''), celda: 'CARTA DE PAGO' };
+      // En negrita (pedido de Carlos, 07/11/2026): el encabezado, su nombre y quien paga; la carátula no.
+      return { ok: true, tipo: 'CARTA', titulo: '', parrafos: [t + '.' + RAYAS], negritas: ['CARTA DE PAGO', 'Carlos E. Arias', pagador],
+               accion: 'CARTA DE PAGO POR HONORARIOS' + (apo ? ' Y APORTES' : ''), celda: 'CARTA DE PAGO' };
     }
 
     if (tipo === 'RECIBO') {
@@ -191,7 +194,19 @@ var Comprobantes = (function () {
     };
   }
 
-  return { ARCA: ARCA, armar: armar, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, textoFactura: textoFactura, partesNominacion: partesNominacion, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
+  /** Dónde van las negritas en un texto: [[desde, hasta)], cada una buscada después de la anterior (las que no están, se saltean). */
+  function tramosNegrita(texto, lista) {
+    var desde = 0, out = [];
+    (lista || []).forEach(function (s) {
+      var k = s ? String(texto).indexOf(s, desde) : -1;
+      if (k < 0) return;
+      out.push([k, k + s.length]);
+      desde = k + s.length;
+    });
+    return out;
+  }
+
+  return { ARCA: ARCA, armar: armar, tramosNegrita: tramosNegrita, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, textoFactura: textoFactura, partesNominacion: partesNominacion, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Comprobantes;
