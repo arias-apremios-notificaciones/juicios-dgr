@@ -1889,7 +1889,7 @@
     var docu = campo(tipo === 'CARTA' ? 'CUIT (optativo)' : 'CUIT o DNI (optativo)', { inputmode: 'numeric', value: b.documento });
     var exptes = campo('Expediente (si son varios del mismo deudor: 19633/24; 7133/25)', { value: b.exptes });
     var jz = Comprobantes.juzgado(b.nom), juz = campo('Juzgado: Cobros y Apremios de la…', { value: jz, placeholder: 'I° Nominación' });
-    var hon = campo(tipo === 'RECIBO' ? 'Honorarios cobrados ($)' : 'Honorarios ($)', { inputmode: 'decimal', value: b.honorarios ? String(b.honorarios).replace('.', ',') : '' });
+    var honor = campo(tipo === 'RECIBO' ? 'Honorarios cobrados ($)' : 'Honorarios ($)', { inputmode: 'decimal', value: b.honorarios ? String(b.honorarios).replace('.', ',') : '' });
     var apo = campo('Aportes previsionales ($, optativo)', { inputmode: 'decimal' });
     var conMontos = h('input', { type: 'checkbox' });
     var concepto = h('select', { class: 'campo-form', 'aria-label': 'Concepto' }, [['TOTAL', 'Pago total'], ['CUENTA', 'Pago a cuenta'], ['CUOTA', 'Pago de una cuota']].map(function (t) { return h('option', { value: t[0], text: t[1] }); }));
@@ -1905,7 +1905,7 @@
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
     var datos = function () {
       return { demandado: x.d, pagador: pagador.i.value, trato: trato.value, documento: docu.i.value.trim(), exptes: exptes.i.value, juzgado: juz.i.value.trim(),
-               honorarios: hon.i.value, aportes: apo.i.value, conMontos: conMontos.checked, concepto: concepto.value,
+               honorarios: honor.i.value, aportes: apo.i.value, conMontos: conMontos.checked, concepto: concepto.value,
                cuota: { n: cuotaN.i.value, de: cuotaDe.i.value }, fecha: fecha.i.value };
     };
     var armado = function () { return Comprobantes.armar(tipo, datos()); };
@@ -1933,7 +1933,7 @@
       tipo === 'CARTA' ? h('label', { class: 'casilla' }, conMontos, ' Con montos ("cancelación total y definitiva… por un monto de…")') : null,
       tipo === 'RECIBO' ? h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Concepto' }), concepto) : null,
       tipo === 'RECIBO' ? h('div', { style: 'display:flex;gap:8px' }, cuotaN.nodo, cuotaDe.nodo) : null,
-      hon.nodo, apo.nodo, tipo === 'RECIBO' ? fecha.nodo : null,
+      honor.nodo, apo.nodo, tipo === 'RECIBO' ? fecha.nodo : null,
       h('label', { class: 'casilla' }, firma, ' Con mi firma y sello escaneados'),
       vista, h('button', { class: 'btn primario', type: 'submit' }, tipo === 'CARTA' ? 'Generar carta de pago' : 'Generar recibo'));
     f.addEventListener('input', function (ev) { if (!vista.contains(ev.target)) pintarVista(); });
