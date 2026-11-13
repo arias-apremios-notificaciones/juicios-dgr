@@ -173,12 +173,33 @@ var Comprobantes = (function () {
     return { nominacion: r === 'I' || r === 'II' ? r + '°' : '', centro: /CONC/.test(s) ? 'CONCEPCION' : 'CAPITAL' };
   }
 
-  /** v: { demandado, nominacion, centro, exptes }. Lo que falta queda como [***] para completarlo a mano. */
+  /**
+   * v: { demandado, nominacion, centro, exptes } (un juzgado) o { demandado, juicios: [{ nominacion, centro, exptes }] } (varios juicios).
+   * Los juicios del mismo juzgado van juntos ("… POR EXPEDIENTE N° 1/24 Y 2/25"); si son de juzgados distintos se encadenan con
+   * "Y ANTE EL JUZGADO …" (pedido de Carlos, 12/11/2026). Lo que falta queda como [***] para completarlo a mano.
+   */
   function textoFactura(v) {
     var dato = function (x) { x = String(x || '').replace(/\s+/g, ' ').trim().toUpperCase(); return x || '[***]'; };
-    var ex = listaExptes(v.exptes);
-    return FACTURA_TEXTO.replace('{DEMANDADO}', dato(v.demandado)).replace('{NOMINACION}', dato(v.nominacion)).replace('{CENTRO}', dato(v.centro))
-      .replace('{EXPEDIENTE}', ex.length ? ex.join(' Y ') : dato(v.exptes));
+    var juicios = Array.isArray(v.juicios) && v.juicios.length ? v.juicios : [{ nominacion: v.nominacion, centro: v.centro, exptes: v.exptes }];
+    var grupos = [];
+    juicios.forEach(function (j) {
+      var nom = dato(j.nominacion), cen = dato(j.centro), ex = listaExptes(j.exptes);
+      var g = grupos.filter(function (x) { return x.nom === nom && x.cen === cen; })[0];
+      if (!g) grupos.push(g = { nom: nom, cen: cen, ex: [], crudo: j.exptes });
+      ex.forEach(function (e) { if (g.ex.indexOf(e) < 0) g.ex.push(e); });
+    });
+    var juzgado = function (g) {
+      return 'ANTE EL JUZGADO DE COBROS Y APREMIOS DE LA ' + g.nom + ' NOMINACION DEL CENTRO JUDICIAL ' + g.cen + ' POR EXPEDIENTE N° ' + (g.ex.length ? g.ex.join(' Y ') : dato(g.crudo));
+    };
+    return FACTURA_TEXTO.replace('{DEMANDADO}', dato(v.demandado))
+      .replace('ANTE EL JUZGADO DE COBROS Y APREMIOS DE LA {NOMINACION} NOMINACION DEL CENTRO JUDICIAL {CENTRO} POR EXPEDIENTE N° {EXPEDIENTE}', grupos.map(juzgado).join(' Y '));
+  }
+
+  /** Total de la factura: la suma de lo que se cobra en cada juicio (honorarios + aportes). null si falta algún importe. */
+  function sumaFactura(juicios) {
+    var total = 0, ok = (juicios || []).length > 0;
+    (juicios || []).forEach(function (j) { var n = monto(j.importe); if (n == null) ok = false; else total += n; });
+    return ok ? Math.round(total * 100) / 100 : null;
   }
 
   /** Lo que se copia en ARCA (Comprobantes en línea → Factura C, monotributo). */
@@ -206,7 +227,7 @@ var Comprobantes = (function () {
     return out;
   }
 
-  return { ARCA: ARCA, armar: armar, tramosNegrita: tramosNegrita, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, textoFactura: textoFactura, partesNominacion: partesNominacion, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
+  return { ARCA: ARCA, armar: armar, tramosNegrita: tramosNegrita, tratoPorNombre: tratoPorNombre, datosFactura: datosFactura, textoFactura: textoFactura, sumaFactura: sumaFactura, partesNominacion: partesNominacion, juzgado: juzgado, listaExptes: listaExptes, enLetras: enLetras, pesos: pesos, monto: monto };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Comprobantes;

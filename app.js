@@ -1844,7 +1844,9 @@
             cc.nodo, h('button', { class: 'btn primario', type: 'submit' }, 'Guardar comprobante')], function () {
         var a = cc.archivo.files[0];
         if (!a) { aviso('Elegí el archivo'); return; }
-        if (!confirm('¿Guardar ' + cc.tipo.options[cc.tipo.selectedIndex].text.toLowerCase() + (cc.numero.value ? ' ' + cc.numero.value : '') + ' de ' + x.d + ' (' + x.e + ')?\n\nArchivo: ' + a.name)) return;
+        var deJuicios = [x.e].concat((x.otros || []).map(function (o) { return o.e; })).join(', ');
+        if (!confirm('¿Guardar ' + cc.tipo.options[cc.tipo.selectedIndex].text.toLowerCase() + (cc.numero.value ? ' ' + cc.numero.value : '') + ' de ' + x.d + ' (' + deJuicios + ')?\n\nArchivo: ' + a.name +
+                     ((x.otros || []).length ? '\n\nQueda enlazado en la fila de HONORARIOS de cada uno de esos juicios.' : ''))) return;
         area.textContent = ''; area.dataset.tipo = '';
         subirComprobante(x, cc.tipo.value, cc.numero.value, a);
       });
@@ -1963,40 +1965,115 @@
     return f;
   }
 
-  /** Factura C en ARCA: la emite Carlos; acá están los datos para copiar y después se sube el PDF. */
+  /** Nombre sin tildes, puntos ni espacios: para reconocer al mismo deudor en otras filas de HONORARIOS. */
+  function claveDeudor(n) { return String(n || '').toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^A-Z0-9]/g, ''); }
+  function cuitDe(e) { var k = Buscador.exptesDe(e)[0], fm = estado.filas.filter(function (f) { return k && Buscador.exptesDe(f.e)[0] === k; })[0]; return fm && fm.c ? String(fm.c).replace(/\D/g, '') : ''; }
+
+  /** Las otras filas de HONORARIOS del mismo deudor (mismo nombre o mismo CUIT), para facturar varios juicios juntos. */
+  function otrosJuiciosDeudor(x) {
+    var nombre = claveDeudor(x.d), cuit = cuitDe(x.e), vistos = {};
+    vistos[Buscador.exptesDe(x.e)[0]] = true;
+    return filasHon(hon.datos).items.filter(function (j) {
+      var k = Buscador.exptesDe(j.e)[0];
+      if (!k || vistos[k] || j.r === x.r) return false;
+      var igual = (nombre && claveDeudor(j.d) === nombre) || (cuit && cuitDe(j.e) === cuit);
+      if (igual) vistos[k] = true;
+      return igual;
+    });
+  }
+
+  /**
+   * Factura C en ARCA: la emite Carlos; acá están los datos para copiar y después se sube el PDF.
+   * Una factura puede cubrir varios juicios del mismo deudor (pedido de Carlos, 12/11/2026): se marcan abajo, el importe se suma solo,
+   * cada juicio lleva su nominación en el texto y el PDF queda enlazado en la fila de cada uno.
+   */
   function panelFactura(x) {
     var b = datosBaseComprobante(x), fd = Comprobantes.datosFactura(b);
     var fila = function (etq, valor) {
       return h('div', { class: 'dato-factura' }, h('span', { class: 'etiqueta', text: etq }), h('b', { text: valor || '—' }),
         valor ? h('button', { class: 'btn chico', type: 'button', onclick: function () { copiar(valor, etq + ' copiado'); } }, 'Copiar') : h('span'));
     };
-    var area = h('div');
-    var subir = function () { area.textContent = ''; var t = h('div'); accion(t, 'subir', x, hon.datos); area.appendChild(t); var sel = t.querySelector('select'); if (sel) sel.value = 'FACTURA'; };
-    // Texto de la descripción: las variables vienen del juicio y se corrigen acá (cada factura arranca de nuevo del modelo).
-    var v = fd.variables;
-    var campoV = function (etq, valor, attrs) { var i = h('input', Object.assign({ class: 'campo-form', 'aria-label': etq, value: valor || '', placeholder: '[***]' }, attrs || {})); return { i: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: etq }), i) }; };
-    var vd = campoV('Demandado', v.demandado), ve = campoV('Expediente (varios: 19633/24; 7133/25)', v.exptes);
-    var vn = h('select', { class: 'campo-form', 'aria-label': 'Nominación' }, [['I°', 'I°'], ['II°', 'II°'], ['', '[***]']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
-    var vc = h('select', { class: 'campo-form', 'aria-label': 'Centro judicial' }, ['CAPITAL', 'CONCEPCION'].map(function (o) { return h('option', { value: o, text: o }); }));
-    vn.value = v.nominacion; vc.value = v.centro;
-    var texto = h('div', { class: 'texto-factura', 'aria-live': 'polite' });
-    var armarTexto = function () { return Comprobantes.textoFactura({ demandado: vd.i.value, nominacion: vn.value, centro: vc.value, exptes: ve.i.value }); };
-    var pintar = function () { texto.textContent = armarTexto(); };
-    [vd.i, ve.i, vn, vc].forEach(function (el) { el.addEventListener('input', pintar); el.addEventListener('change', pintar); });
+    var area = h('div'), texto = h('div', { class: 'texto-factura', 'aria-live': 'polite' }), cajaImporte = h('div');
+    var vd = (function () { var i = h('input', { class: 'campo-form', 'aria-label': 'Demandado', value: fd.variables.demandado || '', placeholder: '[***]' }); return { i: i, nodo: h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Demandado' }), i) }; })();
+    var juicios = [];   // { j, marcado, nom, cen, ex, imp }
+
+    // Un renglón por juicio: expediente, nominación, centro e importe (se corrigen acá; cada factura arranca de nuevo de la planilla).
+    var renglon = function (j, fijo) {
+      var bj = datosBaseComprobante(j), pn = Comprobantes.partesNominacion(bj.nom);
+      var r = { j: j, marcado: h('input', { type: 'checkbox', 'aria-label': 'Incluir ' + j.e }) };
+      r.marcado.checked = !!fijo; r.marcado.disabled = !!fijo;
+      r.ex = h('input', { class: 'campo-form', 'aria-label': 'Expediente', value: Comprobantes.listaExptes(j.e).join('; ') || j.e, placeholder: '[***]' });
+      r.nom = h('select', { class: 'campo-form', 'aria-label': 'Nominación' }, [['I°', 'I°'], ['II°', 'II°'], ['', '[***]']].map(function (o) { return h('option', { value: o[0], text: o[1] }); }));
+      r.cen = h('select', { class: 'campo-form', 'aria-label': 'Centro judicial' }, ['CAPITAL', 'CONCEPCION'].map(function (o) { return h('option', { value: o, text: o }); }));
+      r.nom.value = pn.nominacion; r.cen.value = pn.centro;
+      r.imp = h('input', { class: 'campo-form', 'aria-label': 'Importe de ' + j.e, inputmode: 'decimal', placeholder: '$', value: Comprobantes.monto(bj.honorarios) ? Comprobantes.pesos(Comprobantes.monto(bj.honorarios)).replace('$', '') : '' });
+      [r.marcado, r.ex, r.nom, r.cen, r.imp].forEach(function (el) { el.addEventListener('input', pintar); el.addEventListener('change', pintar); });
+      r.nodo = h('div', { class: 'juicio-factura' + (fijo ? ' fijo' : '') },
+        h('label', { class: 'juicio-factura-cab' }, r.marcado, h('b', { text: j.e }), h('span', { class: 'ayuda chica', text: (j.d || '') + (j.r ? ' · fila ' + j.r : '') })),
+        h('div', { class: 'juicio-factura-campos' },
+          h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Expediente' }), r.ex),
+          h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Nominación' }), r.nom),
+          h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Centro' }), r.cen),
+          h('div', { class: 'campo-rh' }, h('label', { class: 'etiqueta', text: 'Importe ($)' }), r.imp)));
+      juicios.push(r);
+      return r.nodo;
+    };
+    var marcados = function () { return juicios.filter(function (r) { return r.marcado.checked; }); };
+    var armarTexto = function () {
+      return Comprobantes.textoFactura({ demandado: vd.i.value, juicios: marcados().map(function (r) { return { nominacion: r.nom.value, centro: r.cen.value, exptes: r.ex.value }; }) });
+    };
+    var total = function () { return Comprobantes.sumaFactura(marcados().map(function (r) { return { importe: r.imp.value }; })); };
+    function pintar() {
+      texto.textContent = armarTexto();
+      var t = total(), n = marcados().length;
+      cajaImporte.textContent = '';
+      cajaImporte.appendChild(fila('Importe' + (n > 1 ? ' (suma de los ' + n + ' juicios)' : ''), t ? Comprobantes.pesos(t).replace('$', '') : ''));
+      if (!t) cajaImporte.appendChild(h('div', { class: 'ayuda chica', text: 'Falta el importe de algún juicio marcado.' }));
+    }
+
+    var lista = h('div', { class: 'juicios-factura' }, renglon(x, true));
+    var otros = otrosJuiciosDeudor(x);
+    otros.forEach(function (j) { lista.appendChild(renglon(j, false)); });
+    // Otro juicio que no apareció solo (nombre escrito distinto en la planilla): se busca en HONORARIOS.
+    var busca = h('input', { class: 'campo-form', type: 'search', autocomplete: 'off', placeholder: 'Agregar otro juicio: expediente, deudor o CUIT', 'aria-label': 'Agregar otro juicio a la factura' });
+    var res = h('div');
+    busca.addEventListener('input', function () {
+      res.textContent = '';
+      var t = busca.value.trim();
+      if (t.length < 3) return;
+      var ya = juicios.map(function (r) { return r.j.r; });
+      buscarHon(hon.datos, t).filter(function (j) { return ya.indexOf(j.r) < 0; }).slice(0, 6).forEach(function (j) {
+        res.appendChild(h('button', { class: 'man-item', type: 'button', onclick: function () {
+          lista.appendChild(renglon(j, false)); juicios[juicios.length - 1].marcado.checked = true;
+          busca.value = ''; res.textContent = ''; pintar();
+        } }, h('b', { text: j.e }), ' ' + (j.d || '')));
+      });
+    });
+    vd.i.addEventListener('input', pintar);
     pintar();
+
+    var subir = function () {
+      var m = marcados(), faltan = m.filter(function (r) { return !r.j.r; });
+      if (faltan.length) { aviso('Sin fila en HONORARIOS: ' + faltan.map(function (r) { return r.j.e; }).join(', ')); return; }
+      area.textContent = '';
+      var t = h('div');
+      accion(t, 'subir', Object.assign({}, x, { otros: m.filter(function (r) { return r.j.r !== x.r; }).map(function (r) { return { r: r.j.r, e: r.j.e }; }) }), hon.datos);
+      area.appendChild(t);
+      var sel = t.querySelector('select'); if (sel) sel.value = 'FACTURA';
+    };
     var bloqueTexto = h('div', { class: 'campo-rh' },
-      h('label', { class: 'etiqueta', text: 'Texto para la descripción de la factura' }),
-      vd.nodo, h('div', { style: 'display:flex;gap:8px' }, h('div', { class: 'campo-rh', style: 'flex:1' }, h('label', { class: 'etiqueta', text: 'Nominación' }), vn),
-                                                       h('div', { class: 'campo-rh', style: 'flex:1' }, h('label', { class: 'etiqueta', text: 'Centro judicial' }), vc)), ve.nodo,
-      texto,
+      h('label', { class: 'etiqueta', text: 'Texto para la descripción de la factura' }), vd.nodo,
+      h('label', { class: 'etiqueta', text: 'Juicios de esta factura' }),
+      h('div', { class: 'ayuda chica', text: otros.length ? 'Marcá los otros juicios del mismo deudor que cubre esta factura.' : 'No hay otros juicios de este deudor en HONORARIOS. Si cubre otro, buscalo abajo.' }),
+      lista, busca, res, texto,
       h('div', { class: 'botones-hon' }, h('button', { class: 'btn primario', type: 'button', onclick: function () {
         var t = armarTexto();
         if (/\[\*\*\*\]/.test(t) && !confirm('Al texto le falta completar [***]. ¿Copiarlo igual?')) return;
         copiar(t, 'Texto de la factura copiado');
       } }, 'Copiar el texto')));
     return h('div', { class: 'form-hon' },
-      h('div', { class: 'ayuda chica', text: '1) Entrá a ARCA con tu clave fiscal → "Comprobantes en línea" → Factura C (Concepto: Servicios). 2) Copiá estos datos. 3) Bajá el PDF y subilo acá: queda en FACTURAS ' + new Date().getFullYear() + ' y enlazado en HONORARIOS.' }),
-      fila('Receptor', fd.receptor), fila('CUIT / DNI', fd.documento), bloqueTexto, fila('Importe', fd.importe),
+      h('div', { class: 'ayuda chica', text: '1) Entrá a ARCA con tu clave fiscal → "Comprobantes en línea" → Factura C (Concepto: Servicios). 2) Copiá estos datos. 3) Bajá el PDF y subilo acá: queda en FACTURAS ' + new Date().getFullYear() + ' y enlazado en HONORARIOS (en la fila de cada juicio marcado).' }),
+      fila('Receptor', fd.receptor), fila('CUIT / DNI', fd.documento), bloqueTexto, cajaImporte,
       h('div', { class: 'botones-hon' },
         h('a', { class: 'btn primario', href: Comprobantes.ARCA, target: '_blank', rel: 'noopener' }, 'Abrir ARCA ↗'),
         h('button', { class: 'btn', type: 'button', onclick: subir }, 'Ya la emití: subir el PDF')),
@@ -2051,8 +2128,8 @@
   function subirComprobante(x, tipo, numero, archivo) {
     aviso('Subiendo el comprobante…');
     return prepararArchivo(archivo).then(function (a) {
-      return apiPost({ a: 'honComprobante', pin: hon.pin, r: x.r, e: x.e, tipo: tipo, numero: numero || '', mime: a.mime, datos: a.datos });
-    }).then(function (r) { aviso('Comprobante guardado: ' + r.celda); cargarHonorarios(true); })
+      return apiPost({ a: 'honComprobante', pin: hon.pin, r: x.r, e: x.e, otros: x.otros || [], tipo: tipo, numero: numero || '', mime: a.mime, datos: a.datos });
+    }).then(function (r) { aviso('Comprobante guardado' + (r.filas > 1 ? ' y enlazado en ' + r.filas + ' juicios' : '') + ': ' + r.celda); cargarHonorarios(true); })
       .catch(function (e) { aviso('No se pudo guardar el comprobante: ' + traducirError(e)); });
   }
 

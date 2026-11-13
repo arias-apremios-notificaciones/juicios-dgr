@@ -545,3 +545,11 @@ details.grupo[open] > summary::before { content: "▾ "; }
 .dato-factura .etiqueta { grid-column: 1 / -1; }
 .dato-factura b { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
 .texto-factura { background: var(--superficie-2, rgba(0,0,0,.04)); border: 1px solid var(--borde); border-radius: 8px; padding: 10px; font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; margin-top: 6px; }
+.juicios-factura { display: grid; gap: 8px; margin: 6px 0; }
+.juicio-factura { border: 1px solid var(--borde); border-radius: 8px; padding: 8px 10px; }
+.juicio-factura.fijo { border-width: 2px; }
+.juicio-factura:has(.juicio-factura-cab input:not(:checked)) .juicio-factura-campos { opacity: .55; }
+.juicio-factura-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; cursor: pointer; }
+.juicio-factura-cab input { width: 20px; height: 20px; margin: 0; }
+.juicio-factura-campos { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px 8px; margin-top: 6px; }
+.juicio-factura-campos .campo-rh { margin: 0; }
