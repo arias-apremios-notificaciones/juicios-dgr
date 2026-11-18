@@ -3476,12 +3476,14 @@
     else if (inf.leyendo) filas.push(h('div', { class: 'cargando-txt', text: 'Leyendo el informe bancario…' }));
     else if (inf.error) filas.push(h('div', { class: 'alerta', text: 'No pude leer el informe: ' + inf.error + '. Completá los datos a mano.' }));
     else {
-      var d = inf.datos, demandado = Modelos.monto(String(f.i || '')) || Number(f.i) || 0;
+      var d = inf.datos, demandado = Modelos.monto(ed.campos['MONTO A TRANSFERIR']) || Modelos.monto(String(f.i || '')) || Number(f.i) || 0;   // el que quedó en el escrito
       filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '✓ Leído del informe: cuenta ' + (d.cuenta || '—') + ' · CBU ' + (d.cbu || '—') + ' · sucursal ' + (d.sucursal || '—') +
         ' · saldo ' + (d.saldo != null ? Modelos.pesos(d.saldo) : '—') + (d.fechaSaldo ? ' al ' + d.fechaSaldo : '') }));
       if (d.faltan.length) filas.push(h('div', { class: 'alerta', text: 'Del informe no pude sacar: ' + d.faltan.join(', ') + '. Completalo a mano mirando el PDF.' }));
       if (d.saldo === 0) filas.push(h('div', { class: 'alerta', text: 'La cuenta judicial no tiene fondos (saldo $0): todavía no hay nada para transferir.' }));
-      else if (d.saldo != null && demandado && d.saldo < demandado) filas.push(h('div', { class: 'alerta', text: 'Embargo PARCIAL: lo embargado (' + Modelos.pesos(d.saldo) + ') no cubre el monto demandado (' + Modelos.pesos(demandado) + '). El texto para este caso todavía no está sellado.' }));
+      else if (d.saldo != null && demandado && d.saldo < demandado) filas.push(h('div', { class: 'alerta', text: 'Embargo PARCIAL: lo embargado (' + Modelos.pesos(d.saldo) + ') no cubre el monto demandado (' + Modelos.pesos(demandado) + '). ' +
+        'Quedó elegida la variante "Embargo parcial": pide transferir lo embargado a cuenta y mantener el embargo por el saldo (' + Modelos.pesos(Math.round((demandado - d.saldo) * 100) / 100) + '). ' +
+        'Es un texto propuesto: revisalo y, si hace falta, cambialo en Google Docs antes de firmar.' }));
       else if (d.saldo != null && demandado) filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '✓ Embargo TOTAL: lo embargado cubre el monto demandado (' + Modelos.pesos(demandado) + ').' }));
       (inf.avisos || []).forEach(function (a) { filas.push(h('div', { class: 'alerta', text: a })); });
     }
@@ -3501,6 +3503,13 @@
       if (d.cuenta) ed.campos['CUENTA JUDICIAL'] = d.cuenta;
       if (d.cbu) ed.campos['CBU DE LA CUENTA JUDICIAL'] = d.cbu;
       if (d.saldo) ed.campos['MONTO EMBARGADO'] = Modelos.pesos(d.saldo).slice(1);
+      // Embargo total o parcial: elige sola la variante del texto (si Carlos no cambió el cuerpo a mano).
+      var vs = manual.previa && manual.previa.modelo && manual.previa.modelo.variantes || [];
+      var dem = Modelos.monto(ed.campos['MONTO A TRANSFERIR']) || Number(f.i) || 0;
+      if (vs.length > 1 && d.saldo > 0 && dem) {
+        var quiero = d.saldo < dem ? 1 : 0, ahora = ed.variante || 0;
+        if (quiero !== ahora && ed.cuerpo.trim() === vs[ahora].cuerpo.join('\n\n').trim()) { ed.variante = quiero; ed.cuerpo = vs[quiero].cuerpo.join('\n\n'); }
+      }
       if (manual.ed === ed) pintarEleccion();
     }).catch(function (e) { ed.informe = { error: traducirError(e) }; if (manual.ed === ed) pintarEleccion(); });
   }

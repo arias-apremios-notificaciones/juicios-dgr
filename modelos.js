@@ -64,6 +64,17 @@ var Modelos = (function () {
    * Solo se piden los datos cuyo {…} sigue en el título o el cuerpo: si Carlos borra el párrafo, no se reclama el dato.
  * variantes: cuerpos alternativos que se eligen en la app (el primero es el del modelo).
    */
+  // SOLICITO TRANSFERENCIA A LA CUENTA DE DGR: el texto de Carlos (embargo total) y el propuesto para el embargo parcial.
+  var TRANSFERENCIA_TOTAL = ['Atento al estado en el que se encuentran las presentes actuaciones, donde recayó sentencia de trance y remate en fecha {FECHA DE SENTENCIA}, la que se encuentra firme y consentida, en virtud de lo establecido por el artículo 611 y concordantes del CPCCT, solicito que se libre oficio al Banco Macro SA, Sucursal {SUCURSAL} a los fines de que proceda a transferir la suma de {MONTO A TRANSFERIR}, desde la cuenta judicial N° {CUENTA JUDICIAL}, CBU {CBU DE LA CUENTA JUDICIAL} del Banco Macro, Sucursal {SUCURSAL}, la cual se encuentra a nombre de los autos del rubro, {CUENTA DGR}.',
+               'A la fecha se encuentra embargada la suma de {MONTO EMBARGADO}, por lo cual alcanza para hacer efectiva la transferencia solicitada.',
+               'Se deja expresa constancia que el monto por el cual se solicita la transferencia es el monto demandado, por lo cual efectúo reserva de actualizar el monto una vez imputada la suma transferida.',
+               'Presto expresa conformidad con lo dispuesto por el art. 35 de la ley 5480 para la transferencia requerida. Se tenga presente.'];
+  var TRANSFERENCIA_PARCIAL = [
+    'Atento al estado en el que se encuentran las presentes actuaciones, donde recayó sentencia de trance y remate en fecha {FECHA DE SENTENCIA}, la que se encuentra firme y consentida, en virtud de lo establecido por el artículo 611 y concordantes del CPCCT, solicito que se libre oficio al Banco Macro SA, Sucursal {SUCURSAL} a los fines de que proceda a transferir la totalidad de la suma embargada, esto es {MONTO EMBARGADO}, desde la cuenta judicial N° {CUENTA JUDICIAL}, CBU {CBU DE LA CUENTA JUDICIAL} del Banco Macro, Sucursal {SUCURSAL}, la cual se encuentra a nombre de los autos del rubro, {CUENTA DGR}.',
+    'A la fecha se encuentra embargada la suma de {MONTO EMBARGADO}, la cual no alcanza a cubrir el monto demandado de {MONTO A TRANSFERIR}, por lo que la transferencia se solicita a cuenta de capital, intereses y costas, quedando un saldo pendiente de {SALDO PENDIENTE}.',
+    'Asimismo, solicito que se mantenga el embargo trabado hasta cubrir el saldo pendiente, y efectúo reserva de actualizar el monto adeudado una vez imputada la suma transferida.',
+    'Presto expresa conformidad con lo dispuesto por el art. 35 de la ley 5480 para la transferencia requerida. Se tenga presente.'];
+
   var MODELOS = {
     // ── Sellados el 04/11/2026 ──
     // "S.A. ESTABLECIMIENTOS VITIVINICOLAS ESCORIHUELA (5389-19) I - DEVUELVO CEDULA LEY DILIGENCIADA"
@@ -454,26 +465,30 @@ var Modelos = (function () {
       presentacion: ', apoderado en autos por la actora, a V.S. respetuosamente me presento y digo:',
       cierre: true,
       transferencia: true,
-      cuerpo: ['Atento al estado en el que se encuentran las presentes actuaciones, donde recayó sentencia de trance y remate en fecha {FECHA DE SENTENCIA}, la que se encuentra firme y consentida, en virtud de lo establecido por el artículo 611 y concordantes del CPCCT, solicito que se libre oficio al Banco Macro SA, Sucursal {SUCURSAL} a los fines de que proceda a transferir la suma de {MONTO A TRANSFERIR}, desde la cuenta judicial N° {CUENTA JUDICIAL}, CBU {CBU DE LA CUENTA JUDICIAL} del Banco Macro, Sucursal {SUCURSAL}, la cual se encuentra a nombre de los autos del rubro, {CUENTA DGR}.',
-               'A la fecha se encuentra embargada la suma de {MONTO EMBARGADO}, por lo cual alcanza para hacer efectiva la transferencia solicitada.',
-               'Se deja expresa constancia que el monto por el cual se solicita la transferencia es el monto demandado, por lo cual efectúo reserva de actualizar el monto una vez imputada la suma transferida.',
-               'Presto expresa conformidad con lo dispuesto por el art. 35 de la ley 5480 para la transferencia requerida. Se tenga presente.'],
+      cuerpo: TRANSFERENCIA_TOTAL,
+      // Embargo parcial (18/11/2026): Carlos no tenía texto y pidió el que propuso Claude, para corregirlo en Google Docs antes de firmar.
+      variantes: [{ nombre: 'Embargo total (lo embargado cubre lo demandado)', cuerpo: TRANSFERENCIA_TOTAL },
+                  { nombre: 'Embargo parcial (texto propuesto: revisalo antes de firmar)', cuerpo: TRANSFERENCIA_PARCIAL }],
       campos: [{ id: 'FECHA DE SENTENCIA', etiqueta: 'Fecha de la sentencia de trance y remate (sale del SAE)', tipo: 'fecha' },
-               { id: 'MONTO A TRANSFERIR', etiqueta: 'Monto a transferir: el demandado (IMPORTE del MAESTRO)', tipo: 'monto', auto: 'importe' },
+               { id: 'MONTO A TRANSFERIR', etiqueta: 'Monto demandado (IMPORTE del MAESTRO): es lo que se transfiere si el embargo es total', tipo: 'monto', auto: 'importe' },
                { id: 'SUCURSAL', etiqueta: 'Sucursal del Banco Macro (sale del informe bancario)', tipo: 'texto' },
                { id: 'CUENTA JUDICIAL', etiqueta: 'Cuenta judicial N° (sale del informe bancario)', tipo: 'numero' },
                { id: 'CBU DE LA CUENTA JUDICIAL', etiqueta: 'CBU de la cuenta judicial (22 números, sale del informe bancario)', tipo: 'cbu' },
                { id: 'MONTO EMBARGADO', etiqueta: 'Monto embargado: saldo de la cuenta judicial (sale del informe bancario)', tipo: 'monto' },
                { id: 'CUENTA DGR', etiqueta: 'Cuenta de la DGR (la del sistema)', tipo: 'sistema', auto: 'cuentaDgr' }],
-      calcular: function (n) {
-        if (n['MONTO EMBARGADO'] != null && n['MONTO A TRANSFERIR'] != null && n['MONTO EMBARGADO'] < n['MONTO A TRANSFERIR']) {
-          return { error: 'Lo embargado (' + pesos(n['MONTO EMBARGADO']) + ') no alcanza para el monto demandado (' + pesos(n['MONTO A TRANSFERIR']) + '): el texto de embargo parcial todavía no está sellado.' };
-        }
-        return {};
+      // Total o parcial según el texto: el parcial es el que tiene {SALDO PENDIENTE} (= demandado − embargado).
+      calcular: function (n, texto) {
+        var emb = n['MONTO EMBARGADO'], dem = n['MONTO A TRANSFERIR'];
+        if (emb == null || dem == null) return {};
+        var parcial = String(texto || '').indexOf('{SALDO PENDIENTE}') >= 0;
+        if (!parcial && emb < dem) return { error: 'Lo embargado (' + pesos(emb) + ') no alcanza para el monto demandado (' + pesos(dem) + '): elegí la variante "Embargo parcial".' };
+        if (parcial && emb >= dem) return { error: 'Lo embargado (' + pesos(emb) + ') cubre el monto demandado (' + pesos(dem) + '): elegí la variante "Embargo total".' };
+        return parcial ? { 'SALDO PENDIENTE': pesos(Math.round((dem - emb) * 100) / 100), 'MONTO TRANSFERIDO': pesos(emb), 'TIPO DE EMBARGO': ' (EMBARGO PARCIAL)' }
+                       : { 'MONTO TRANSFERIDO': pesos(dem), 'TIPO DE EMBARGO': '' };
       },
       requisitos: ['La sentencia de trance y remate está firme y consentida.',
                    'Se pidió el embargo de fondos y el informe bancario es el último (saldo actualizado).'],
-      seguimiento: 'SOLICITO TRANSFERENCIA DE {MONTO A TRANSFERIR} A LA CUENTA DE DGR.',
+      seguimiento: 'SOLICITO TRANSFERENCIA DE {MONTO TRANSFERIDO}{TIPO DE EMBARGO} A LA CUENTA DE DGR.',
       adjunto: { etiqueta: 'Informe bancario (Colegio de Abogados)', archivo: 'INFORME BANCARIO' }
     },
 
@@ -647,7 +662,7 @@ var Modelos = (function () {
       } else v[c.id] = crudo;
     }
     if (m.calcular) {
-      var calc = m.calcular(n);
+      var calc = m.calcular(n, texto);
       if (calc.error) return { error: calc.error };
       Object.keys(calc).forEach(function (k) { v[k] = calc[k]; });
     }
