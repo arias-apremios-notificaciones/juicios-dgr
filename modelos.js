@@ -30,7 +30,7 @@ var Modelos = (function () {
   var PRESENTACION_PRUEBA = ', de las condiciones personales que constan en autos, a V.S. respetuosamente me presento y digo:';
   var DOCUMENTAL_HABITUAL = 'Las constancias de autos, en especial el escrito de demanda, las boletas de deuda -cargos tributarios- que sirven de base a la presente acción y el escrito de contestación de Excepciones.';
   var INFORMATIVA_HABITUAL = 'Solicito se libre oficio a la División Control de Cobros Judiciales de la DGR, a los fines de que por su intermedio remita copia digitalizada del expediente Nº {EXPEDIENTE ADMINISTRATIVO}.';
-  var CUADERNOS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6'];
+  var CUADERNOS = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9'];   // A = actor (la DGR)
   // Lo copiado de la contestación se acomoda a la redacción de los escritos base ("Las constancias de autos…", "Solicito se libre oficio…").
   function acomodarPrueba(clase, p) {
     p = String(p).replace(/\s+/g, ' ').trim().replace(/^[•\-–]\s*/, '');
@@ -701,11 +701,10 @@ var Modelos = (function () {
     if (resto) return { ok: false, error: 'Hay un dato entre llaves que no se completa: ' + resto[0] + '. Borralo o corregilo.' };
 
     // Cuaderno de prueba: va pegado al Nº del expediente (3624/26-A1) y en el nombre del archivo.
-    var cuaderno = '';
-    if (m.prueba) {
-      cuaderno = limpio((ed.campos || {}).CUADERNO || 'A1').toUpperCase();
-      if (!/^[A-Z]\d{1,2}$/.test(cuaderno)) return { ok: false, error: 'El cuaderno de prueba va como A1, A2…' };
-    }
+    // Cualquier escrito puede ir a un cuaderno (pedido de Carlos, 18/11/2026: se elige junto a "Expediente o deudor");
+    // en OFREZCO PRUEBA el cuaderno es un dato del propio escrito.
+    var cuaderno = m.prueba ? limpio((ed.campos || {}).CUADERNO || 'A1').toUpperCase() : limpio(ed.cuaderno || '').toUpperCase();
+    if (cuaderno && !/^[A-Z]\d{1,2}$/.test(cuaderno)) return { ok: false, error: 'El cuaderno de prueba va como A1, A2…' };
     var subidos = (ed.archivos || []).length;
     var edictosAuto = !!(m.edictos && ed.edictos && ed.edictos.primero);   // los del Boletín Oficial cuentan como lo subido
     if (m.adjunto && !m.adjunto.opcional && !subidos && !edictosAuto) return { ok: false, error: 'Falta subir el archivo: ' + m.adjunto.etiqueta.toLowerCase() + '.' };
@@ -780,7 +779,7 @@ var Modelos = (function () {
   return { MODELOS: MODELOS, AGREGADOS: AGREGADOS, CARPETA: CARPETA, CARPETA_ADJUNTOS: CARPETA_ADJUNTOS,
            lista: lista, buscar: buscar, paraApp: paraApp, valorAuto: valorAuto, encabezado: encabezado, armar: armar,
            pruebaOfrecida: pruebaOfrecida, cuerpoPrueba: cuerpoPrueba,
-           pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto,
+           CUADERNOS: CUADERNOS, pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto,
            cbuValido: cbuValido, leerInformeBancario: leerInformeBancario,
            GENERICO_TITULO: GENERICO_TITULO, GENERICO_CUERPO: GENERICO_CUERPO, AVISO_GENERICO: AVISO_GENERICO };
 })();

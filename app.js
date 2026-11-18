@@ -2521,7 +2521,7 @@
   // ───────── Escritos a mano (elegir tipo + expediente → generar) ─────────
   // Los tipos (en orden alfabético) y el buscador por palabras están en modelos.js, igual que los textos sellados.
   // ed: el título, el cuerpo, los datos entre llaves y los archivos a unir del modelo tal como los dejó Carlos (null = todavía sin tocar)
-  var manual = { tipo: null, buscarModelo: '', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null };
+  var manual = { tipo: null, buscarModelo: '', texto: '', fila: null, previa: null, error: '', resultado: null, generando: false, ed: null, cuaderno: '' };
   function esModelo(tipo) { return !!Modelos.MODELOS[tipo]; }
 
   var LECTURA_MOTOR = {
@@ -3087,6 +3087,7 @@
     };
     var pintarModelos = function () {
       if (btnGenerico) { btnGenerico.classList.toggle('primario', manual.tipo === 'GENERICO'); btnGenerico.setAttribute('aria-pressed', String(manual.tipo === 'GENERICO')); }
+      if (selCuaderno) { pintarCuaderno(); if (selCuaderno.disabled) manual.cuaderno = ''; }
       manual.buscarModelo = buscarM.value;
       listaM.textContent = '';
       var t = buscarM.value.trim();
@@ -3117,7 +3118,25 @@
       });
       if (!lista.firstChild) lista.appendChild(h('p', { class: 'ayuda chica', text: 'No hay coincidencias en la planilla.' }));
     };
-    inp.addEventListener('input', function () { manual.fila = null; manual.previa = null; manual.resultado = null; manual.error = ''; pintarEleccion(); mostrarCoincidencias(); });
+    inp.addEventListener('input', function () { manual.fila = null; manual.previa = null; manual.resultado = null; manual.error = ''; manual.cuaderno = ''; selCuaderno.value = ''; pintarEleccion(); mostrarCoincidencias(); });
+
+    // Cuaderno de prueba (pedido de Carlos, 18/11/2026): A1, A2… (A = actor) se agrega al Nº del expediente del escrito: "3624/26-A2".
+    var selCuaderno = h('select', { id: 'man-cuaderno', class: 'campo-form' },
+      h('option', { value: '' }, 'Expediente principal (sin cuaderno)'),
+      Modelos.CUADERNOS.map(function (c) { return h('option', { value: c, selected: manual.cuaderno === c }, 'Cuaderno de prueba ' + c); }));
+    var notaCuaderno = h('p', { class: 'ayuda chica' });
+    var pintarCuaderno = function () {
+      var fijo = manual.tipo && !esModelo(manual.tipo);   // pedido de sentencia e IVP: siempre al principal
+      selCuaderno.disabled = !!fijo;
+      if (fijo) selCuaderno.value = '';
+      notaCuaderno.textContent = fijo ? 'El pedido de sentencia y el comunico de IVP van siempre al expediente principal.'
+        : 'Si el escrito va a un cuaderno de prueba, elegilo: se agrega al Nº del expediente (…/26-A2), al nombre del archivo y al SEGUIMIENTO.';
+    };
+    selCuaderno.addEventListener('change', function () {
+      manual.cuaderno = selCuaderno.value;
+      if (manual.ed && manual.previa && manual.previa.modelo && manual.previa.modelo.prueba && manual.cuaderno) manual.ed.campos.CUADERNO = manual.cuaderno;
+      pintarEleccion();
+    });
 
     // Escrito genérico (pedido de Carlos, 18/11/2026): siempre a mano, arriba a la derecha, sin buscarlo en la lista.
     var btnGenerico = h('button', { class: 'btn' + (manual.tipo === 'GENERICO' ? ' primario' : ''), type: 'button', 'aria-pressed': String(manual.tipo === 'GENERICO'),
@@ -3128,6 +3147,7 @@
       h('div', { class: 'fila-panel' }, h('h2', { text: 'Nuevo escrito' }), btnGenerico),
       h('label', { class: 'etiqueta', for: 'man-modelo', text: 'Modelo de escrito (' + Modelos.lista().length + ', en orden alfabético)' }), buscarM, listaM,
       h('label', { class: 'etiqueta', for: 'man-expte', text: 'Expediente o deudor' }), inp, lista,
+      h('label', { class: 'etiqueta', for: 'man-cuaderno', text: 'Cuaderno' }), selCuaderno, notaCuaderno,
       h('p', { class: 'ayuda chica', text: 'Más modelos se suman a medida que se sellen.' })));
     cont.appendChild(h('div', { id: 'man-eleccion' }));
     var cta = panelCuentaDgr();
@@ -3202,7 +3222,8 @@
     if (!f) return;
     var tarjeta = h('div', { class: 'panel' },
       h('div', { class: 'fila1' }, h('div', { class: 'deudor', text: f.d }), h('span', { class: 'estado ' + (COLOR_ESTADO[f.g] || ''), text: f.g || 'SIN ESTADO' })),
-      h('div', { class: 'fila2' }, h('span', { class: 'expte', text: 'Expte. ' + f.e }), h('span', { text: Buscador.nominacion(f.n).texto })));
+      h('div', { class: 'fila2' }, h('span', { class: 'expte', text: 'Expte. ' + f.e + (manual.cuaderno ? '-' + manual.cuaderno : '') }), h('span', { text: Buscador.nominacion(f.n).texto }),
+        manual.cuaderno ? h('span', { class: 'chip-tipo', text: 'CUADERNO ' + manual.cuaderno }) : null));
     caja.appendChild(tarjeta);
 
     if (manual.resultado) {
@@ -3218,7 +3239,7 @@
         h('div', { class: 'botones', style: 'margin-top:8px' },
           esperando ? null : h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
           h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'),
-          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; manual.ed = null; pintarEscritos(); } }, 'Otro escrito')),
+          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; manual.ed = null; manual.cuaderno = ''; pintarEscritos(); } }, 'Otro escrito')),
         r.faltaTexto ? h('div', { class: 'alerta', text: 'Falta escribir el título o el texto: tocá "Editar en Google Docs", escribilo y después "Rehacer el PDF con los cambios".' }) : null,
         botonesEditar(r.escrito, function (x) {
           r.faltaTexto = /Falta escribir/.test(x.aviso || '');
@@ -3276,6 +3297,7 @@
     if (!manual.ed) {
       var auto = { demandado: f.d, cuit: f.c, importe: f.i, hoy: isoADmy(hoyInput()), cuentaDgr: estado.cuentaDgr }, iniciales = {};
       campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
+      if (m.prueba && manual.cuaderno) iniciales.CUADERNO = manual.cuaderno;   // el elegido junto al expediente
       manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales, requisitos: [] };
       var g0 = p.edictos && p.edictos.grupos[p.edictos.elegido];
       manual.ed.grupoEdicto = g0 ? p.edictos.elegido : -1;
@@ -3285,7 +3307,7 @@
     var requisitos = m.requisitos || [];
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
-      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos, cierre: ed.cierre,
+      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos, cierre: ed.cierre, cuaderno: manual.cuaderno,
                                           archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i, cuentaDgr: estado.cuentaDgr } });
     };
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
@@ -3443,7 +3465,7 @@
       manual.generando = true; pintarEleccion();
       Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
         return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, campos: ed.campos, archivos: archivos,
-                         edictos: archivos.length ? null : ed.edictos, cierre: m.generico ? !!ed.cierre : undefined });
+                         edictos: archivos.length ? null : ed.edictos, cierre: m.generico ? !!ed.cierre : undefined, cuaderno: manual.cuaderno || '' });
       }).then(function (r) {
         manual.generando = false;
         r.sinArca = !ed.arca && !ed.archivos.length;
