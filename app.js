@@ -3100,7 +3100,12 @@
   function panelCuentaDgr() {
     var c = estado.cuentaDgr;
     if (!c) return null;
-    var bloque = ['Titular: ' + c.titular, 'CUIT: ' + c.cuit, 'Banco: ' + c.banco, 'Cuenta N° ' + c.cuenta, 'CBU: ' + c.cbu].join('\n');
+    if (!c.vigente) {   // Carlos avisó que la cuenta cargada está mal (12/11/2026): no se ofrece copiarla
+      return h('details', { class: 'panel cuenta-dgr' },
+        h('summary', null, h('b', { text: 'Cuenta de la DGR para transferencias' })),
+        h('div', { class: 'alerta', text: 'La cuenta de la DGR se está actualizando: no copies los datos viejos. Cuando se cargue la nueva, aparece acá.' }));
+    }
+    var bloque = ['Titular: ' + c.titular, 'CUIT: ' + c.cuit, 'Banco: ' + c.banco, 'Cuenta: ' + c.cuenta, 'CBU: ' + c.cbu].concat(c.alias ? ['Alias: ' + c.alias] : []).join('\n');
     return h('details', { class: 'panel cuenta-dgr' },
       h('summary', null, h('b', { text: 'Cuenta de la DGR para transferencias' })),
       h('pre', { class: 'cuenta-dgr-datos', text: bloque }),
@@ -3218,7 +3223,7 @@
     var m = p.modelo;
     var campos = m.campos || [];
     if (!manual.ed) {
-      var auto = { demandado: f.d, cuit: f.c, importe: f.i, hoy: isoADmy(hoyInput()) }, iniciales = {};
+      var auto = { demandado: f.d, cuit: f.c, importe: f.i, hoy: isoADmy(hoyInput()), cuentaDgr: estado.cuentaDgr }, iniciales = {};
       campos.forEach(function (c) { iniciales[c.id] = Modelos.valorAuto(c, auto); });
       manual.ed = { titulo: m.titulo, cuerpo: m.cuerpo.join('\n\n'), arca: !!m.arca, archivos: [], campos: iniciales, requisitos: [] };
       var g0 = p.edictos && p.edictos.grupos[p.edictos.elegido];
@@ -3230,7 +3235,7 @@
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
       return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos,
-                                          archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i } });
+                                          archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i, cuentaDgr: estado.cuentaDgr } });
     };
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
     var actualizarVista = function () {
@@ -3263,7 +3268,14 @@
     titulo.addEventListener('input', function () { ed.titulo = titulo.value; actualizarVista(); });
     cuerpo.addEventListener('input', function () { ed.cuerpo = cuerpo.value; actualizarVista(); });
     var datos = [];   // etiqueta + casilla de cada dato (h() aplana un solo nivel)
+    if (p.transferencia) caja.appendChild(panelTransferencia(p.transferencia, ed, f));
     campos.forEach(function (c, i) {
+      if (c.tipo === 'sistema') {   // la cuenta de la DGR: la pone el sistema, no se escribe
+        var val = Modelos.valorAuto(c, { cuentaDgr: estado.cuentaDgr });
+        datos.push(h('div', { class: 'etiqueta', text: c.etiqueta + ' → {' + c.id + '}' }),
+                   val ? h('div', { class: 'ayuda chica', text: '…' + val + '.' }) : h('div', { class: 'alerta', text: 'La cuenta de la DGR se está actualizando: este escrito no se puede generar hasta cargar la nueva.' }));
+        return;
+      }
       if (c.tipo === 'opciones') {   // desplegable (bancos del embargo); "Otro" abre una casilla para escribirlo
         var valor = ed.campos[c.id] || '', otro = valor && c.opciones.indexOf(valor) < 0;
         var sel = h('select', { id: 'mod-campo-' + i, class: 'campo-form' },
@@ -3321,7 +3333,9 @@
     if (m.adjunto) {
       var elegir = h('input', { id: 'mod-archivo', class: 'campo-form', type: 'file', multiple: true, accept: 'application/pdf,image/*' });
       elegir.addEventListener('change', function () {
-        ed.archivos = ed.archivos.concat(Array.prototype.slice.call(elegir.files));
+        var nuevos = Array.prototype.slice.call(elegir.files);
+        ed.archivos = ed.archivos.concat(nuevos);
+        if (m.transferencia && nuevos.length) leerInformeBancario(nuevos[0], ed, f);   // los datos de la cuenta judicial salen del informe
         pintarEleccion();
       });
       subir = h('div', { class: 'campo-rh' },
@@ -3377,6 +3391,53 @@
     });
     caja.appendChild(h('div', { class: 'botones' }, btn));
     actualizarVista();
+  }
+
+  /**
+   * SOLICITO TRANSFERENCIA A LA CUENTA DE DGR (pedido de Carlos, 18/11/2026): lo que dice el SAE (sentencia, embargos),
+   * la cuenta de la DGR del sistema y lo leído del informe bancario (cuenta judicial, CBU, sucursal y saldo).
+   */
+  function panelTransferencia(t, ed, f) {
+    var filas = [];
+    filas.push(t.sentencia ? h('div', { class: 'ayuda chica', style: 'color:inherit', text: '✓ Sentencia de trance y remate en el SAE: ' + t.fechaSentencia + (t.detalleSentencia ? ' (' + t.detalleSentencia.replace(/^[\d/]+ · /, '') + ')' : '') })
+                           : h('div', { class: 'alerta', text: 'No encontré la sentencia de trance y remate en el SAE. Revisá el juicio y escribí la fecha a mano si existe.' }));
+    if (t.embargos.length) {
+      filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: 'Embargo en el SAE (lo más reciente):' }));
+      t.embargos.slice(0, 4).forEach(function (x) { filas.push(h('div', { class: 'ayuda chica', text: '· ' + x.fecha + ' — ' + x.desc })); });
+    } else filas.push(h('div', { class: 'alerta', text: 'No encontré en el SAE movimientos de embargo de fondos. Revisá que se haya pedido y trabado.' }));
+    if (!t.cuentaDgr.vigente) filas.push(h('div', { class: 'alerta', text: 'La cuenta de la DGR se está actualizando: el escrito no se puede generar hasta cargar la nueva.' }));
+    var inf = ed.informe;
+    if (!inf) filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '→ Subí abajo el informe bancario del Colegio de Abogados: leo la cuenta judicial, el CBU, la sucursal y lo embargado.' }));
+    else if (inf.leyendo) filas.push(h('div', { class: 'cargando-txt', text: 'Leyendo el informe bancario…' }));
+    else if (inf.error) filas.push(h('div', { class: 'alerta', text: 'No pude leer el informe: ' + inf.error + '. Completá los datos a mano.' }));
+    else {
+      var d = inf.datos, demandado = Modelos.monto(String(f.i || '')) || Number(f.i) || 0;
+      filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '✓ Leído del informe: cuenta ' + (d.cuenta || '—') + ' · CBU ' + (d.cbu || '—') + ' · sucursal ' + (d.sucursal || '—') +
+        ' · saldo ' + (d.saldo != null ? Modelos.pesos(d.saldo) : '—') + (d.fechaSaldo ? ' al ' + d.fechaSaldo : '') }));
+      if (d.faltan.length) filas.push(h('div', { class: 'alerta', text: 'Del informe no pude sacar: ' + d.faltan.join(', ') + '. Completalo a mano mirando el PDF.' }));
+      if (d.saldo === 0) filas.push(h('div', { class: 'alerta', text: 'La cuenta judicial no tiene fondos (saldo $0): todavía no hay nada para transferir.' }));
+      else if (d.saldo != null && demandado && d.saldo < demandado) filas.push(h('div', { class: 'alerta', text: 'Embargo PARCIAL: lo embargado (' + Modelos.pesos(d.saldo) + ') no cubre el monto demandado (' + Modelos.pesos(demandado) + '). El texto para este caso todavía no está sellado.' }));
+      else if (d.saldo != null && demandado) filas.push(h('div', { class: 'ayuda chica', style: 'color:inherit', text: '✓ Embargo TOTAL: lo embargado cubre el monto demandado (' + Modelos.pesos(demandado) + ').' }));
+      (inf.avisos || []).forEach(function (a) { filas.push(h('div', { class: 'alerta', text: a })); });
+    }
+    var ok = t.sentencia && t.embargos.length && t.cuentaDgr.vigente && inf && inf.datos && !inf.datos.faltan.length;
+    return h('div', { class: 'panel ' + (ok ? 'caja-ok' : 'caja-aviso') }, h('b', { text: 'Antes de pedir la transferencia' }), filas);
+  }
+
+  function leerInformeBancario(archivo, ed, f) {
+    ed.informe = { leyendo: true };
+    prepararArchivo(archivo).then(function (a) {
+      return apiPost({ a: 'leerInforme', e: f.e, mime: a.mime, datos: a.datos });
+    }).then(function (r) {
+      if (!r.ok) throw new Error(r.error || 'No se pudo');
+      ed.informe = { datos: r.informe, avisos: r.avisos || [] };
+      var d = r.informe;
+      if (d.sucursal) ed.campos.SUCURSAL = d.sucursal;
+      if (d.cuenta) ed.campos['CUENTA JUDICIAL'] = d.cuenta;
+      if (d.cbu) ed.campos['CBU DE LA CUENTA JUDICIAL'] = d.cbu;
+      if (d.saldo) ed.campos['MONTO EMBARGADO'] = Modelos.pesos(d.saldo).slice(1);
+      if (manual.ed === ed) pintarEleccion();
+    }).catch(function (e) { ed.informe = { error: traducirError(e) }; if (manual.ed === ed) pintarEleccion(); });
   }
 
   /**

@@ -58,7 +58,8 @@ var Modelos = (function () {
    * Cada modelo: nombre (= título, como se lista), claves (para el buscador), titulo, presentacion, cuerpo, arca,
    * adjunto (lo que Carlos sube y se une detrás del escrito), campos (datos entre llaves), calcular, seguimiento, cierre,
  * requisitos (lo que Carlos confirma en la app antes de generar).
-   * Campos: tipo texto | fecha | monto | cuit | anio (4 números) | opciones (desplegable, con "Otro" a mano); auto: demandado | cuit | importe | hoy (se completa solo con el MAESTRO / la fecha de hoy).
+   * Campos: tipo texto | fecha | monto | cuit | anio (4 números) | numero | cbu (22 números con dígitos verificadores) | opciones (desplegable, con "Otro" a mano)
+   *   | sistema (lo pone el servidor y no se edita: la cuenta de la DGR); auto: demandado | cuit | importe | hoy | cuentaDgr (se completa solo con el MAESTRO / la fecha de hoy / el sistema).
    * adjunto.opcional: se puede generar sin subir nada (DOY CUMPLIMIENTO, SE NOTIFIQUE POR EDICTOS); si se sube, se une igual.
    * Solo se piden los datos cuyo {…} sigue en el título o el cuerpo: si Carlos borra el párrafo, no se reclama el dato.
  * variantes: cuerpos alternativos que se eligen en la app (el primero es el del modelo).
@@ -443,8 +444,73 @@ var Modelos = (function () {
       cuerpo: cuerpoPrueba('INFORMATIVA', [INFORMATIVA_HABITUAL]),
       campos: [{ id: 'CUADERNO', etiqueta: 'Cuaderno de prueba (se agrega al Nº del expediente: …/23-A2)', tipo: 'opciones', opciones: CUADERNOS, defecto: 'A2' },
                { id: 'EXPEDIENTE ADMINISTRATIVO', etiqueta: 'Expediente administrativo (ej. 6564/376-D-2022)', tipo: 'texto' }]
+    },
+    // "MODELO ESCRITO PEDIDO DE TRANSFERENCIA A CUENTA DE DGR" (Carlos, 18/11/2026): hay sentencia, se pidió embargo de fondos y están embargados.
+    // La fecha de la sentencia sale del SAE; la cuenta judicial, el CBU, la sucursal y lo embargado, del informe bancario del Colegio de Abogados;
+    // el monto es el demandado (IMPORTE del MAESTRO) y la cuenta de la DGR es la del sistema (Codigo.gs, CUENTA_DGR): si no está vigente, no se genera.
+    TRANSFERENCIA_DGR: {
+      nombre: 'SOLICITO TRANSFERENCIA A LA CUENTA DE DGR', claves: 'transferencia fondos embargados cuenta judicial dgr informe bancario cbu sentencia firme 611 5480 oficio banco macro',
+      titulo: 'SOLICITO TRANSFERENCIA',
+      presentacion: ', apoderado en autos por la actora, a V.S. respetuosamente me presento y digo:',
+      cierre: true,
+      transferencia: true,
+      cuerpo: ['Atento al estado en el que se encuentran las presentes actuaciones, donde recayó sentencia de trance y remate en fecha {FECHA DE SENTENCIA}, la que se encuentra firme y consentida, en virtud de lo establecido por el artículo 611 y concordantes del CPCCT, solicito que se libre oficio al Banco Macro SA, Sucursal {SUCURSAL} a los fines de que proceda a transferir la suma de {MONTO A TRANSFERIR}, desde la cuenta judicial N° {CUENTA JUDICIAL}, CBU {CBU DE LA CUENTA JUDICIAL} del Banco Macro, Sucursal {SUCURSAL}, la cual se encuentra a nombre de los autos del rubro, {CUENTA DGR}.',
+               'A la fecha se encuentra embargada la suma de {MONTO EMBARGADO}, por lo cual alcanza para hacer efectiva la transferencia solicitada.',
+               'Se deja expresa constancia que el monto por el cual se solicita la transferencia es el monto demandado, por lo cual efectúo reserva de actualizar el monto una vez imputada la suma transferida.',
+               'Presto expresa conformidad con lo dispuesto por el art. 35 de la ley 5480 para la transferencia requerida. Se tenga presente.'],
+      campos: [{ id: 'FECHA DE SENTENCIA', etiqueta: 'Fecha de la sentencia de trance y remate (sale del SAE)', tipo: 'fecha' },
+               { id: 'MONTO A TRANSFERIR', etiqueta: 'Monto a transferir: el demandado (IMPORTE del MAESTRO)', tipo: 'monto', auto: 'importe' },
+               { id: 'SUCURSAL', etiqueta: 'Sucursal del Banco Macro (sale del informe bancario)', tipo: 'texto' },
+               { id: 'CUENTA JUDICIAL', etiqueta: 'Cuenta judicial N° (sale del informe bancario)', tipo: 'numero' },
+               { id: 'CBU DE LA CUENTA JUDICIAL', etiqueta: 'CBU de la cuenta judicial (22 números, sale del informe bancario)', tipo: 'cbu' },
+               { id: 'MONTO EMBARGADO', etiqueta: 'Monto embargado: saldo de la cuenta judicial (sale del informe bancario)', tipo: 'monto' },
+               { id: 'CUENTA DGR', etiqueta: 'Cuenta de la DGR (la del sistema)', tipo: 'sistema', auto: 'cuentaDgr' }],
+      calcular: function (n) {
+        if (n['MONTO EMBARGADO'] != null && n['MONTO A TRANSFERIR'] != null && n['MONTO EMBARGADO'] < n['MONTO A TRANSFERIR']) {
+          return { error: 'Lo embargado (' + pesos(n['MONTO EMBARGADO']) + ') no alcanza para el monto demandado (' + pesos(n['MONTO A TRANSFERIR']) + '): el texto de embargo parcial todavía no está sellado.' };
+        }
+        return {};
+      },
+      requisitos: ['La sentencia de trance y remate está firme y consentida.',
+                   'Se pidió el embargo de fondos y el informe bancario es el último (saldo actualizado).'],
+      seguimiento: 'SOLICITO TRANSFERENCIA DE {MONTO A TRANSFERIR} A LA CUENTA DE DGR.',
+      adjunto: { etiqueta: 'Informe bancario (Colegio de Abogados)', archivo: 'INFORME BANCARIO' }
     }
   };
+
+  /** CBU: 22 números con los dos dígitos verificadores (bloque del banco y bloque de la cuenta). */
+  function cbuValido(c) {
+    c = String(c || '').replace(/\D/g, '');
+    if (c.length !== 22) return false;
+    var dv = function (txt, pesos) { var s = 0; for (var i = 0; i < pesos.length; i++) s += Number(txt[i]) * pesos[i]; return (10 - s % 10) % 10; };
+    return dv(c, [7, 1, 3, 9, 7, 1, 3]) === Number(c[7]) && dv(c.slice(8), [3, 9, 7, 1, 3, 9, 7, 1, 3, 9, 7, 1, 3]) === Number(c[21]);
+  }
+
+  /**
+   * Informe de cuenta bancaria judicial del Colegio de Abogados (F.CB.01), en sus dos formatos:
+   * "CUENTA MACRO N° … / CBU MACRO … / SUCURSAL 00622 — TRIBUNALES / SALDO AL 21/08/2026 AR$ 2.462.911,18" (2026) y
+   * "Cuenta MACRO Nº: … / Sucursal: CONCEPCION / Saldo: AR$ 0.00 / Fecha: 09/06/2026" (impresión de la página).
+   * @return { cuenta, cbu, sucursal, saldo (número), fechaSaldo, expediente, demandado, faltan: [] }
+   */
+  var SUCURSALES = { TRIBUNALES: 'Tribunales', CONCEPCION: 'Concepción', 'CASA CENTRAL': 'Casa Central' };
+  function leerInformeBancario(texto) {
+    var t = String(texto || '').replace(/\r/g, '').replace(/[ \t\u00a0]+/g, ' ');
+    var uno = function (re) { var m = t.match(re); return m ? m[1].trim() : ''; };
+    var r = {};
+    r.cuenta = uno(/CUENTA\s+MACRO\s+N\s*[°º]?\s*:?\s*([\d\/.\-]+)/i).replace(/\./g, '');
+    r.cbu = uno(/CBU(?:\s+MACRO)?\s*:?\s*(\d[\d ]{20,30}\d)/i).replace(/\D/g, '');
+    var suc = uno(/SUCURSAL\s*:?\s*(?:\d+\s*[—–-]\s*)?([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]*?)\s*(?:\n|$)/i).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    r.sucursal = SUCURSALES[suc] || suc.toLowerCase().replace(/(^|\s)\S/g, function (x) { return x.toUpperCase(); });
+    var saldo = uno(/SALDO(?:\s+AL\s+\d\d\/\d\d\/\d{4})?\s*:?\s*AR\$\s*([\d.,]+)/i);
+    if (/^\d+\.\d{2}$/.test(saldo)) saldo = saldo.replace('.', ',');   // "0.00" de la impresión vieja
+    r.saldo = saldo === '' ? null : (/^0+([.,]0+)?$/.test(saldo) ? 0 : monto(saldo));
+    r.fechaSaldo = uno(/SALDO\s+AL\s+(\d\d\/\d\d\/\d{4})/i) || uno(/\bFecha\s*:\s*(\d\d\/\d\d\/\d{4})/i);
+    r.expediente = uno(/\bEXPEDIENTE\s*:?\s*(\d+(?:\/\d+)?)\s*(?:\n|$)/i);
+    r.demandado = uno(/\bDEMANDADO\s*:?\s*([^\n]+)/i);
+    r.faltan = [['cuenta', 'cuenta judicial'], ['cbu', 'CBU'], ['sucursal', 'sucursal'], ['saldo', 'saldo']].filter(function (x) { return r[x[0]] === '' || r[x[0]] == null; }).map(function (x) { return x[1]; });
+    if (r.cbu && !cbuValido(r.cbu)) r.faltan.push('CBU válido');
+    return r;
+  }
 
   // Lo que se le puede sumar a cualquier modelo con un toque (título + párrafos).
   var AGREGADOS = {
@@ -513,7 +579,7 @@ var Modelos = (function () {
     return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null, requisitos: (m.requisitos || []).slice(),
              variantes: (m.variantes || []).map(function (v) { return { nombre: v.nombre, cuerpo: v.cuerpo.slice() }; }),
              campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', defecto: c.defecto || '', opciones: (c.opciones || []).slice() }; }),
-             prueba: m.prueba || '', edictos: !!m.edictos, agregados: ag };
+             prueba: m.prueba || '', edictos: !!m.edictos, transferencia: !!m.transferencia, agregados: ag };
   }
 
   /** Valor automático de un campo (auto = { demandado, cuit, importe, hoy } del juicio). */
@@ -521,6 +587,7 @@ var Modelos = (function () {
     if (!c.auto || !auto) return c.defecto || '';
     if (c.auto === 'cuit') return String(auto.cuit || '').replace(/\D/g, '');
     if (c.auto === 'importe') return Number(auto.importe) > 0 ? pesos(auto.importe).slice(1) : '';   // IMPORTE del MAESTRO: "603.301,60"
+    if (c.auto === 'cuentaDgr') return auto.cuentaDgr && auto.cuentaDgr.vigente && auto.cuentaDgr.frase ? String(auto.cuentaDgr.frase) : '';
     return String(auto[c.auto] || '');
   }
 
@@ -542,8 +609,9 @@ var Modelos = (function () {
     var v = {}, n = {};
     var campos = m.campos || [];
     for (var i = 0; i < campos.length; i++) {
-      var c = campos[i], nombre = c.etiqueta.replace(/ \(.*\)$/, ''), crudo = limpio(dados[c.id]) || valorAuto(c, auto);
-      if (texto != null && !m.calcular && texto.indexOf('{' + c.id + '}') < 0) continue;   // el dato ya no está en el texto
+      var c = campos[i], nombre = c.etiqueta.replace(/ \(.*\)$/, ''), crudo = c.tipo === 'sistema' ? valorAuto(c, auto) : limpio(dados[c.id]) || valorAuto(c, auto);
+      if (texto != null && (!m.calcular || c.tipo === 'sistema') && texto.indexOf('{' + c.id + '}') < 0) continue;   // el dato ya no está en el texto
+      if (!crudo && c.tipo === 'sistema') return { error: 'Falta la cuenta actualizada de la DGR en el sistema: no se puede generar este escrito hasta cargarla.' };
       if (!crudo) return { error: 'Falta completar: ' + nombre + '.' };
       if (c.tipo === 'monto') {
         if ((n[c.id] = monto(crudo)) === null) return { error: nombre + ': el monto no es válido.' };
@@ -556,6 +624,12 @@ var Modelos = (function () {
       } else if (c.tipo === 'cuit') {
         v[c.id] = crudo.replace(/\D/g, '');
         if (!/^\d{11}$/.test(v[c.id])) return { error: 'El CUIT tiene que tener 11 números.' };
+      } else if (c.tipo === 'cbu') {
+        v[c.id] = crudo.replace(/\D/g, '');
+        if (!cbuValido(v[c.id])) return { error: nombre + ': el CBU tiene que tener 22 números y sus dígitos verificadores no coinciden.' };
+      } else if (c.tipo === 'numero') {
+        v[c.id] = crudo.replace(/[\s.]/g, '');
+        if (!/^\d[\d\/-]*$/.test(v[c.id])) return { error: nombre + ': tiene que ser un número.' };
       } else v[c.id] = crudo;
     }
     if (m.calcular) {
@@ -671,7 +745,8 @@ var Modelos = (function () {
   return { MODELOS: MODELOS, AGREGADOS: AGREGADOS, CARPETA: CARPETA, CARPETA_ADJUNTOS: CARPETA_ADJUNTOS,
            lista: lista, buscar: buscar, paraApp: paraApp, valorAuto: valorAuto, encabezado: encabezado, armar: armar,
            pruebaOfrecida: pruebaOfrecida, cuerpoPrueba: cuerpoPrueba,
-           pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto };
+           pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto,
+           cbuValido: cbuValido, leerInformeBancario: leerInformeBancario };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Modelos;
