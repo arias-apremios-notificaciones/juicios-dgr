@@ -1008,6 +1008,35 @@
     escritosPorAnio(cont, lista, 'No hay escritos de este tipo.');
   }
 
+  /**
+   * Google Doc de cada escrito generado (pedido de Carlos, 18/11/2026): editarlo en Google Docs, bajarlo en Word
+   * y "Rehacer el PDF" con los cambios (se le vuelve a unir lo que lleva detrás: ARCA, IVP, adjuntos).
+   */
+  function urlDoc(doc) { return 'https://docs.google.com/document/d/' + encodeURIComponent(doc) + '/edit'; }
+  function urlWord(doc) { return 'https://docs.google.com/document/d/' + encodeURIComponent(doc) + '/export?format=docx'; }
+  function botonesEditar(x, alRehacer) {
+    if (!x || !x.doc) return null;
+    var txt = 'Rehacer el PDF con los cambios';
+    var rehacer = x.id ? h('button', { class: 'btn', type: 'button' }, txt) : null;
+    if (rehacer) rehacer.addEventListener('click', function () {
+      if (!confirm('¿Rehacer el PDF de ' + x.d + ' (' + x.e + ') con lo que cambiaste en Google Docs?\n\nEl PDF anterior va a la papelera de Drive y al nuevo se le vuelve a unir lo que llevaba detrás (ARCA, IVP, adjuntos).')) return;
+      rehacer.disabled = true; rehacer.textContent = 'Rehaciendo…';
+      apiPost({ a: 'rehacerPdf', id: x.id }).then(function (r) {
+        rehacer.disabled = false; rehacer.textContent = txt;
+        x.url = r.url;
+        aviso('PDF rehecho con tus cambios' + (r.uniendo ? (r.arca ? ': en menos de un minuto se le une lo que lleva detrás' : ': falta la constancia de ARCA del mes para unirla') : ''));
+        if (alRehacer) alRehacer(r);
+      }).catch(function (e) { rehacer.disabled = false; rehacer.textContent = txt; aviso('No se pudo: ' + traducirError(e)); });
+    });
+    return h('div', { class: 'editar-escrito' },
+      h('div', { class: 'botones' },
+        h('a', { class: 'btn', href: urlDoc(x.doc), target: '_blank', rel: 'noopener' }, 'Editar en Google Docs'),
+        h('a', { class: 'btn', href: urlWord(x.doc), target: '_blank', rel: 'noopener' }, 'Bajar en Word'),
+        rehacer),
+      h('div', { class: 'ayuda chica', text: 'En Google Docs los cambios se guardan solos; después tocá "Rehacer el PDF" y queda el PDF nuevo para firmar. ' +
+                                            'El Word es para cambiarlo en la PC: ese lo imprimís o lo guardás como PDF vos (no se le une la constancia).' }));
+  }
+
   function tarjetaEscrito(x) {
     var chk = h('input', { type: 'checkbox', checked: !!firmar.sel[x.id], 'aria-label': 'Seleccionar ' + x.d });
     var card = h('div', { class: 'escrito' + (firmar.sel[x.id] ? ' marcado' : '') },
@@ -1023,6 +1052,12 @@
       x.aviso ? h('div', { class: 'alerta', text: '⚠ ' + x.aviso }) : null,
       h('div', { class: 'botones' },
         h('a', { class: 'btn primario', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
+        x.doc ? h('button', { class: 'btn', type: 'button', 'aria-expanded': 'false', onclick: function (ev) {
+          var abierto = !card.querySelector('.editar-escrito');
+          ev.currentTarget.setAttribute('aria-expanded', String(abierto));
+          if (abierto) card.appendChild(botonesEditar(x, function () { setTimeout(cargarFirmar, 1500); setTimeout(cargarFirmar, 45000); }));
+          else card.removeChild(card.querySelector('.editar-escrito'));
+        } }, 'Editar') : null,
         h('button', { class: 'btn', type: 'button', onclick: function () { verJuicio(x.e); } }, 'Ver juicio'),
         h('button', { class: 'btn', type: 'button', onclick: function () { descartar(x); } }, 'Descartar')));
     chk.addEventListener('change', function () {
@@ -2211,6 +2246,7 @@
         boton.disabled = false; resultado.textContent = '';
         aviso('Escrito generado');
         var g = { tipo: 'escrito', titulo: sel.options[sel.selectedIndex].text, e: r.escrito.e, d: r.escrito.d, r: j.r, url: r.escrito.url, pdfId: r.escrito.pdfId,
+                  id: r.escrito.id || '', doc: r.escrito.doc || '',
                   texto: r.seguimiento || '', creado: Date.now(), anotado: null };
         hon.generados.unshift(g);
         refrescarGenerados();
@@ -2219,6 +2255,7 @@
           r.aviso ? h('div', { class: 'alerta', text: r.aviso }) : null,
           h('div', { class: 'botones-hon' }, h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
             h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar')),
+          botonesEditar(g),
           panelActualizar(g)));
       }).catch(function (e) {
         boton.disabled = false; resultado.textContent = '';
@@ -2412,7 +2449,7 @@
         h('div', { class: 'meta', text: 'Expte. ' + x.e + ' · ' + cuando }),
         g.tipo === 'formulario' ? resultadoFormRH(x)
           : h('div', null, h('div', { class: 'botones-hon' }, h('a', { class: 'btn', href: x.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
-              h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar')), panelActualizar(x)));
+              h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar')), botonesEditar(x), panelActualizar(x)));
       cont.appendChild(item);
     });
   }
@@ -3049,10 +3086,12 @@
       else { pintarEleccion(); $('man-expte').focus(); }
     };
     var pintarModelos = function () {
+      if (btnGenerico) { btnGenerico.classList.toggle('primario', manual.tipo === 'GENERICO'); btnGenerico.setAttribute('aria-pressed', String(manual.tipo === 'GENERICO')); }
       manual.buscarModelo = buscarM.value;
       listaM.textContent = '';
       var t = buscarM.value.trim();
-      var elegido = Modelos.lista().filter(function (x) { return x.id === manual.tipo; })[0];
+      var elegido = manual.tipo === 'GENERICO' ? { id: 'GENERICO', nombre: Modelos.MODELOS.GENERICO.nombre }
+                  : Modelos.lista().filter(function (x) { return x.id === manual.tipo; })[0];
       if (elegido && !t) {
         listaM.appendChild(h('div', { class: 'man-elegido' }, h('b', { text: '✓ ' + elegido.nombre }),
           h('button', { class: 'btn chico', type: 'button', onclick: function () { manual.tipo = null; manual.ed = null; manual.previa = null; pintarModelos(); pintarEleccion(); buscarM.focus(); } }, 'Cambiar')));
@@ -3080,8 +3119,13 @@
     };
     inp.addEventListener('input', function () { manual.fila = null; manual.previa = null; manual.resultado = null; manual.error = ''; pintarEleccion(); mostrarCoincidencias(); });
 
+    // Escrito genérico (pedido de Carlos, 18/11/2026): siempre a mano, arriba a la derecha, sin buscarlo en la lista.
+    var btnGenerico = h('button', { class: 'btn' + (manual.tipo === 'GENERICO' ? ' primario' : ''), type: 'button', 'aria-pressed': String(manual.tipo === 'GENERICO'),
+                                    title: 'Solo encabezado, carátula y "CARLOS E. ARIAS, apoderado en autos por la actora…": el título y el texto los escribís vos' },
+                         '✎ Escrito genérico');
+    btnGenerico.addEventListener('click', function () { elegirTipo('GENERICO'); });
     cont.appendChild(h('div', { class: 'panel' },
-      h('h2', { text: 'Nuevo escrito' }),
+      h('div', { class: 'fila-panel' }, h('h2', { text: 'Nuevo escrito' }), btnGenerico),
       h('label', { class: 'etiqueta', for: 'man-modelo', text: 'Modelo de escrito (' + Modelos.lista().length + ', en orden alfabético)' }), buscarM, listaM,
       h('label', { class: 'etiqueta', for: 'man-expte', text: 'Expediente o deudor' }), inp, lista,
       h('p', { class: 'ayuda chica', text: 'Más modelos se suman a medida que se sellen.' })));
@@ -3105,7 +3149,8 @@
         h('summary', null, h('b', { text: 'Cuenta de la DGR para transferencias' })),
         h('div', { class: 'alerta', text: 'La cuenta de la DGR se está actualizando: no copies los datos viejos. Cuando se cargue la nueva, aparece acá.' }));
     }
-    var bloque = ['Titular: ' + c.titular, 'CUIT: ' + c.cuit, 'Banco: ' + c.banco, 'Cuenta: ' + c.cuenta, 'CBU: ' + c.cbu].concat(c.alias ? ['Alias: ' + c.alias] : []).join('\n');
+    // Sin número de cuenta (pedido de Carlos, 18/11/2026: es muy largo y el juzgado lo confunde con el CBU).
+    var bloque = ['Titular: ' + c.titular, 'CUIT: ' + c.cuit, 'Banco: ' + c.banco].concat(c.cuenta ? ['Cuenta: ' + c.cuenta] : [], ['CBU: ' + c.cbu], c.alias ? ['Alias: ' + c.alias] : []).join('\n');
     return h('details', { class: 'panel cuenta-dgr' },
       h('summary', null, h('b', { text: 'Cuenta de la DGR para transferencias' })),
       h('pre', { class: 'cuenta-dgr-datos', text: bloque }),
@@ -3173,7 +3218,13 @@
         h('div', { class: 'botones', style: 'margin-top:8px' },
           esperando ? null : h('a', { class: 'btn primario', href: r.escrito.url, target: '_blank', rel: 'noopener' }, 'Abrir PDF'),
           h('button', { class: 'btn', type: 'button', onclick: function () { cambiarVista('firmar'); } }, 'Ir a Para firmar'),
-          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; manual.ed = null; pintarEscritos(); } }, 'Otro escrito'))));
+          h('button', { class: 'btn', type: 'button', onclick: function () { manual.fila = null; manual.texto = ''; manual.resultado = null; manual.ed = null; pintarEscritos(); } }, 'Otro escrito')),
+        r.faltaTexto ? h('div', { class: 'alerta', text: 'Falta escribir el título o el texto: tocá "Editar en Google Docs", escribilo y después "Rehacer el PDF con los cambios".' }) : null,
+        botonesEditar(r.escrito, function (x) {
+          r.faltaTexto = /Falta escribir/.test(x.aviso || '');
+          if (x.uniendo) { r.unido = false; r.arca = x.arca; if (r.arca) esperarArca(r, 0); }
+          firmar.datos = null; pintarEleccion();
+        })));
       return;
     }
     if (manual.error) { caja.appendChild(h('p', { class: 'error', text: manual.error })); return; }
@@ -3234,7 +3285,7 @@
     var requisitos = m.requisitos || [];
     // Cómo queda con los datos completados (o qué falta), con las mismas reglas que usa el servidor.
     var armado = function (conArchivos) {
-      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos,
+      return Modelos.armar(manual.tipo, { titulo: ed.titulo, cuerpo: ed.cuerpo, arca: ed.arca, campos: ed.campos, edictos: ed.edictos, cierre: ed.cierre,
                                           archivos: conArchivos ? ed.archivos : (m.adjunto ? [1] : []), auto: { demandado: f.d, cuit: f.c, importe: f.i, cuentaDgr: estado.cuentaDgr } });
     };
     var vista = h('div', { class: 'vista-modelo', 'aria-live': 'polite' });
@@ -3356,17 +3407,30 @@
       return h('label', { class: 'check-hon' }, c, ' ' + t);
     });
 
+    // Genérico: cómo cierra (los dos cierres de los escritos de Carlos).
+    var elegirCierre = null;
+    if (m.generico) {
+      elegirCierre = h('select', { id: 'mod-cierre', class: 'campo-form' },
+        h('option', { value: '0', selected: !ed.cierre }, 'Proveer de Conformidad / JUSTICIA.-'),
+        h('option', { value: '1', selected: !!ed.cierre }, 'Proveer de Conformidad, que / SERA JUSTICIA.-'));
+      elegirCierre.addEventListener('change', function () { ed.cierre = elegirCierre.value === '1'; });
+      titulo.placeholder = 'Si lo dejás vacío, queda ' + Modelos.GENERICO_TITULO + ' para escribirlo en Google Docs';
+      cuerpo.placeholder = 'Si lo dejás vacío, queda un renglón para escribirlo en Google Docs (un renglón en blanco separa los párrafos)';
+    }
     caja.appendChild(h('div', { class: 'panel form-hon' },
+      m.generico ? h('div', { class: 'ayuda chica', text: 'Escrito genérico: el sistema pone el encabezado, la carátula del juicio y "CARLOS E. ARIAS, apoderado en autos por la actora, a V.S. respetuosamente me presento y digo:". ' +
+                                                         'El título y el texto los escribís acá o, después de generarlo, en Google Docs o Word.' }) : null,
       requisitos.length ? h('div', { class: 'ayuda chica', text: 'Antes de generar, confirmá:' }) : null, tildes,
       campos.length ? h('div', { class: 'ayuda chica', text: 'Datos del escrito: van donde el texto dice {…}.' }) : null, datos,
-      h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' }), titulo,
+      h('label', { class: 'etiqueta', for: 'mod-titulo', text: 'Título (también va en el nombre del archivo y en el SEGUIMIENTO)' + (m.generico ? ' · optativo' : '') }), titulo,
       elegirVariante ? h('label', { class: 'etiqueta', for: 'mod-variante', text: 'Variante del texto' }) : null, elegirVariante,
-      h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' }), cuerpo,
+      h('label', { class: 'etiqueta', for: 'mod-cuerpo', text: 'Cuerpo (un renglón en blanco separa los párrafos)' + (m.generico ? ' · optativo' : '') }), cuerpo,
+      elegirCierre ? h('label', { class: 'etiqueta', for: 'mod-cierre', text: 'Cierre' }) : null, elegirCierre,
       vista,
       subir,
       h('label', { class: 'check-hon' }, arca, ' Unir la constancia de ARCA del mes'),
-      h('div', { class: 'botones', style: 'margin-top:8px' }, agregados, volver),
-      h('p', { class: 'ayuda chica', text: 'Encabezado, carátula, comparecencia y cierre los pone el sistema. Los cambios valen solo para este escrito: el modelo queda como está.' })));
+      m.generico ? null : h('div', { class: 'botones', style: 'margin-top:8px' }, agregados, volver),
+      m.generico ? null : h('p', { class: 'ayuda chica', text: 'Encabezado, carátula, comparecencia y cierre los pone el sistema. Los cambios valen solo para este escrito: el modelo queda como está.' })));
 
     var btn = h('button', { class: 'btn primario', type: 'button', disabled: manual.generando }, manual.generando ? 'Generando…' : 'Generar escrito');
     btn.addEventListener('click', function () {
@@ -3379,10 +3443,11 @@
       manual.generando = true; pintarEleccion();
       Promise.all(ed.archivos.map(prepararArchivo)).then(function (archivos) {
         return apiPost({ a: 'generar', tipo: manual.tipo, e: f.e, forzar: !!p.pendiente, titulo: ed.titulo, cuerpo: parrafos, arca: ed.arca, campos: ed.campos, archivos: archivos,
-                         edictos: archivos.length ? null : ed.edictos });
+                         edictos: archivos.length ? null : ed.edictos, cierre: m.generico ? !!ed.cierre : undefined });
       }).then(function (r) {
         manual.generando = false;
         r.sinArca = !ed.arca && !ed.archivos.length;
+        r.faltaTexto = !!control.aviso;
         r.anexo = [ed.archivos.length ? m.adjunto.etiqueta.toLowerCase() : r.edictos ? 'los edictos del Boletín Oficial' : '', ed.arca ? 'la constancia de ARCA' : ''].filter(Boolean).join(' y ');
         manual.resultado = r; manual.ed = null; pintarEleccion();
         firmar.datos = null; contarFirmar(Number($('cuenta-firmar').textContent || 0) + 1);

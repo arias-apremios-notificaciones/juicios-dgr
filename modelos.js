@@ -475,8 +475,22 @@ var Modelos = (function () {
                    'Se pidió el embargo de fondos y el informe bancario es el último (saldo actualizado).'],
       seguimiento: 'SOLICITO TRANSFERENCIA DE {MONTO A TRANSFERIR} A LA CUENTA DE DGR.',
       adjunto: { etiqueta: 'Informe bancario (Colegio de Abogados)', archivo: 'INFORME BANCARIO' }
+    },
+
+    // ── ESCRITO GENÉRICO (pedido de Carlos, 18/11/2026): el sistema pone solo el encabezado, la carátula y
+    //    "CARLOS E. ARIAS, apoderado en autos por la actora…"; el título y el texto los escribe Carlos (en la app o después en Google Docs / Word).
+    //    No sale en la lista de modelos: tiene su botón fijo arriba a la derecha de "Nuevo escrito". ──
+    GENERICO: {
+      nombre: 'ESCRITO GENÉRICO', claves: 'generico libre en blanco otro', generico: true,
+      titulo: '', presentacion: ', apoderado en autos por la actora, a V.S. respetuosamente me presento y digo:',
+      cuerpo: [],
+      adjunto: { etiqueta: 'Archivo para unir detrás del escrito', archivo: 'ADJUNTO', opcional: true }
     }
   };
+
+  // Lo que queda en el escrito genérico si Carlos no escribe el título o el texto en la app (lo completa en Google Docs).
+  var GENERICO_TITULO = '[TÍTULO DEL ESCRITO]', GENERICO_CUERPO = '[Escribir acá el texto del escrito.]';
+  var AVISO_GENERICO = 'Falta escribir el título o el texto: tocá "Editar" → "Editar en Google Docs" y después "Rehacer el PDF".';
 
   /** CBU: 22 números con los dos dígitos verificadores (bloque del banco y bloque de la cuenta). */
   function cbuValido(c) {
@@ -557,7 +571,7 @@ var Modelos = (function () {
                { id: 'COMUNICO_IVP', nombre: 'COMUNICO CANCELACIÓN (IVP)', claves: 'ivp cancelacion cancelado pago comunico informe verificacion' }];
   function lista() {
     return FIJOS.map(function (t) { return { id: t.id, nombre: t.nombre, claves: t.claves, modelo: false }; })
-      .concat(Object.keys(MODELOS).map(function (id) { var m = MODELOS[id]; return { id: id, nombre: m.nombre, claves: m.claves + ' ' + m.cuerpo.join(' '), modelo: true }; }))
+      .concat(Object.keys(MODELOS).filter(function (id) { return !MODELOS[id].generico; }).map(function (id) { var m = MODELOS[id]; return { id: id, nombre: m.nombre, claves: m.claves + ' ' + m.cuerpo.join(' '), modelo: true }; }))
       .sort(function (a, b) { return clave(a.nombre) < clave(b.nombre) ? -1 : clave(a.nombre) > clave(b.nombre) ? 1 : 0; });
   }
 
@@ -579,7 +593,7 @@ var Modelos = (function () {
     return { id: id, nombre: m.nombre, titulo: m.titulo, cuerpo: m.cuerpo.slice(), arca: !!m.arca, adjunto: m.adjunto || null, requisitos: (m.requisitos || []).slice(),
              variantes: (m.variantes || []).map(function (v) { return { nombre: v.nombre, cuerpo: v.cuerpo.slice() }; }),
              campos: (m.campos || []).map(function (c) { return { id: c.id, etiqueta: c.etiqueta, tipo: c.tipo, auto: c.auto || '', defecto: c.defecto || '', opciones: (c.opciones || []).slice() }; }),
-             prueba: m.prueba || '', edictos: !!m.edictos, transferencia: !!m.transferencia, agregados: ag };
+             prueba: m.prueba || '', edictos: !!m.edictos, transferencia: !!m.transferencia, generico: !!m.generico, agregados: ag };
   }
 
   /** Valor automático de un campo (auto = { demandado, cuit, importe, hoy } del juicio). */
@@ -655,6 +669,9 @@ var Modelos = (function () {
     var titulo = ed.titulo == null ? m.titulo : limpio(ed.titulo).toUpperCase();
     var cuerpo = ed.cuerpo == null ? m.cuerpo.slice()
                : (Array.isArray(ed.cuerpo) ? ed.cuerpo : String(ed.cuerpo).split(/\n\s*\n/)).map(limpio).filter(Boolean);
+    var faltaTexto = false;   // genérico: lo que no se escribió queda marcado para completarlo en Google Docs
+    if (m.generico && !titulo.replace(/[.\-–\s]/g, '')) { titulo = GENERICO_TITULO; faltaTexto = true; }
+    if (m.generico && !cuerpo.length) { cuerpo = [GENERICO_CUERPO]; faltaTexto = true; }
     if (!titulo.replace(/[.\-–\s]/g, '')) return { ok: false, error: 'Falta el título del escrito.' };
     if (titulo.length > MAX_TITULO) return { ok: false, error: 'El título es muy largo (máximo ' + MAX_TITULO + ' letras).' };
     if (!cuerpo.length) return { ok: false, error: 'El cuerpo del escrito está vacío.' };
@@ -679,11 +696,14 @@ var Modelos = (function () {
     if (m.adjunto && !m.adjunto.opcional && !subidos && !edictosAuto) return { ok: false, error: 'Falta subir el archivo: ' + m.adjunto.etiqueta.toLowerCase() + '.' };
     if (subidos > MAX_ARCHIVOS) return { ok: false, error: 'Son muchos archivos (máximo ' + MAX_ARCHIVOS + ').' };
     var sinPunto = titulo.replace(/[\s.\-–]+$/, '');
+    if (m.generico && titulo === GENERICO_TITULO) sinPunto = 'ESCRITO';   // nombre del archivo y SEGUIMIENTO hasta que lo complete
     // Seguimiento propio del modelo (p. ej. con el saldo) solo si el título quedó como en el modelo.
     var seguimiento = m.seguimiento && tituloModelo ? rellenar(m.seguimiento, c.valores) : sinPunto + '.';
     if (/\{[^{}]+\}/.test(seguimiento)) seguimiento = sinPunto + '.';   // un dato del seguimiento quedó afuera del texto
+    if (m.generico && titulo === GENERICO_TITULO) seguimiento = 'PRESENTO ESCRITO.';   // al "Rehacer el PDF" se toma el título que escribió
     return {
-      ok: true, titulo: titulo, accion: sinPunto + (cuaderno ? ' ' + cuaderno : ''), tipo: sinPunto, presentacion: m.presentacion, cierre: !!m.cierre, cuerpo: cuerpo,
+      ok: true, titulo: titulo, accion: sinPunto + (cuaderno ? ' ' + cuaderno : ''), tipo: sinPunto, presentacion: m.presentacion,
+      cierre: m.generico && ed.cierre != null ? !!ed.cierre : !!m.cierre, cuerpo: cuerpo, aviso: faltaTexto ? AVISO_GENERICO : '', generico: !!m.generico,
       cuaderno: cuaderno, seguimiento: cuaderno ? seguimiento.replace(/\.$/, ' (CUADERNO ' + cuaderno + ').') : seguimiento, sinArca: !(ed.arca == null ? !!m.arca : ed.arca), carpeta: CARPETA, adjunto: m.adjunto || null
     };
   }
@@ -746,7 +766,8 @@ var Modelos = (function () {
            lista: lista, buscar: buscar, paraApp: paraApp, valorAuto: valorAuto, encabezado: encabezado, armar: armar,
            pruebaOfrecida: pruebaOfrecida, cuerpoPrueba: cuerpoPrueba,
            pesos: pesos, monto: monto, fecha: fecha, columnaAdjunto: columnaAdjunto, leerAdjunto: leerAdjunto,
-           cbuValido: cbuValido, leerInformeBancario: leerInformeBancario };
+           cbuValido: cbuValido, leerInformeBancario: leerInformeBancario,
+           GENERICO_TITULO: GENERICO_TITULO, GENERICO_CUERPO: GENERICO_CUERPO, AVISO_GENERICO: AVISO_GENERICO };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = Modelos;
